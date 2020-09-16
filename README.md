@@ -35,7 +35,8 @@ Accordingly,  you  could  add  the  newly  implemented  HTTP  specifications  in
 
 ## Grading Policy (10 Marks)
 1. HTTP Library: total of 7 marks
-    - Get request: 3 marks•Header: 1 mark 
+    - Get request: 3 marks
+    - Header: 1 mark 
     - Post request (eg. with body): 2 marks
     - Response (eg. parse status, code, header, and body): 1 mark
     
