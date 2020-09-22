@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"httpc/pkg/libhttpc"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -70,12 +71,26 @@ func parseQueryParams(inputURL string) {
 
 func main() {
 	fmt.Println("httpc: a HTTP client")
-	makeGet()
-
-	body := map[string]string{
-		"name": "Siddhant",
-		"age":  "24",
+	sampleHeaders := libhttpc.Header{
+		"Authorization": "None",
+		"Referer":       "google.com",
+		"Content-Type":  "application/json",
 	}
-	makePost(body)
-	parseQueryParams("https://example.com/endpoint?name=Siddhant%20Bansal&age=24")
+	sampleBody := map[string]string{
+		"Bleh": "bleeh",
+	}
+	//_, err := libhttpc.Get("http://httpbin.org/headers", sampleHeaders)
+	reqBody, _ := json.Marshal(sampleBody)
+	_, err := libhttpc.Post("http://httpbin.org/post", sampleHeaders, reqBody)
+	if err != nil {
+		fmt.Println(err)
+	}
+	//makeGet()
+	//
+	//body := map[string]string{
+	//	"name": "Siddhant",
+	//	"age":  "24",
+	//}
+	//makePost(body)
+	//parseQueryParams("https://example.com/endpoint?name=Siddhant%20Bansal&age=24")
 }
