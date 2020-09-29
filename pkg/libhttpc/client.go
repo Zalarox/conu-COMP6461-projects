@@ -9,19 +9,6 @@ import (
 	"strings"
 )
 
-const ProtocolVersion = "HTTP/1.0"
-const CRLF = "\r\n"
-const BlankString = ""
-
-type RequestHeader map[string]string
-
-type Response struct {
-	StatusCode int
-	Protocol   string
-	Headers    string
-	Body       string
-}
-
 func Get(inputUrl string, headers RequestHeader) (string, error) {
 	parsedURL, parsedHeaders, conn, err := connectHandler(inputUrl, headers)
 
@@ -31,13 +18,17 @@ func Get(inputUrl string, headers RequestHeader) (string, error) {
 
 	defer conn.Close()
 
-	requestString := fmt.Sprintf("GET %s %s%s%s%s%s", parsedURL.RequestURI(), ProtocolVersion, CRLF, parsedHeaders, CRLF, CRLF)
+	requestString := fmt.Sprintf(
+		"GET %s %s%s%s%s%s",
+		parsedURL.RequestURI(), ProtocolVersion, CRLF,
+		parsedHeaders, CRLF, CRLF)
+
 	fmt.Fprintf(conn, requestString)
 	fmt.Println(requestString)
 	response, err := readResponseFromConnection(conn)
 
 	if err != nil {
-		return "", nil
+		return BlankString, nil
 	}
 
 	return string(response), nil
@@ -59,7 +50,7 @@ func Post(inputUrl string, headers RequestHeader, body []byte) (string, error) {
 	response, err := readResponseFromConnection(conn)
 
 	if err != nil {
-		return "", err
+		return BlankString, err
 	}
 
 	return string(response), nil
@@ -130,11 +121,11 @@ func connectHandler(inputUrl string, headers RequestHeader) (*url.URL, string, n
 	parsedHeaders := stringifyHeaders(headers)
 
 	if urlErr != nil {
-		return nil, "", nil, urlErr
+		return nil, BlankString, nil, urlErr
 	}
 
 	port := parsedURL.Port()
-	if port == "" {
+	if port == BlankString {
 		port = "80"
 	}
 
@@ -145,7 +136,7 @@ func connectHandler(inputUrl string, headers RequestHeader) (*url.URL, string, n
 }
 
 func stringifyHeaders(headers RequestHeader) string {
-	headersString := ""
+	headersString := BlankString
 	for headerKey, headerValue := range headers {
 		headersString += fmt.Sprintf("%s:%s%s", headerKey, headerValue, CRLF)
 	}
