@@ -81,7 +81,7 @@ func main() {
 	}
 	//_, err := libhttpc.Get("http://httpbin.org/headers", sampleHeaders)
 	reqBody, _ := json.Marshal(sampleBody)
-	resp, err := libhttpc.Post("ttp://httpbin.org/post", sampleHeaders, reqBody)
+	resp, err := libhttpc.Post("http://httpbin.org/post", sampleHeaders, reqBody)
 	if err != nil {
 		fmt.Println(err)
 	}
