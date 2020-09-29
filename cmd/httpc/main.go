@@ -71,19 +71,23 @@ func parseQueryParams(inputURL string) {
 
 func main() {
 	fmt.Println("httpc: a HTTP client")
-	sampleHeaders := libhttpc.Header{
-		"Authorization": "None",
-		"Referer":       "google.com",
+	sampleHeaders := libhttpc.RequestHeader{
 		"Content-Type":  "application/json",
+		"Authorization": "None",
 	}
 	sampleBody := map[string]string{
 		"Bleh": "bleeh",
 	}
-	//_, err := libhttpc.Get("http://httpbin.org/headers", sampleHeaders)
+
 	reqBody, _ := json.Marshal(sampleBody)
-	resp, err := libhttpc.Post("http://httpbin.org/post", sampleHeaders, reqBody)
+
+	resp, err := libhttpc.Post("https://httpbin.org/post", sampleHeaders, reqBody)
 	if err != nil {
 		fmt.Println(err)
 	}
-	fmt.Println(resp)
+
+	response, err := libhttpc.FromString(resp)
+
+	fmt.Println(response.Body)
+
 }
