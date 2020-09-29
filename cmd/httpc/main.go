@@ -81,16 +81,9 @@ func main() {
 	}
 	//_, err := libhttpc.Get("http://httpbin.org/headers", sampleHeaders)
 	reqBody, _ := json.Marshal(sampleBody)
-	_, err := libhttpc.Post("http://httpbin.org/post", sampleHeaders, reqBody)
+	resp, err := libhttpc.Post("ttp://httpbin.org/post", sampleHeaders, reqBody)
 	if err != nil {
 		fmt.Println(err)
 	}
-	//makeGet()
-	//
-	//body := map[string]string{
-	//	"name": "Siddhant",
-	//	"age":  "24",
-	//}
-	//makePost(body)
-	//parseQueryParams("https://example.com/endpoint?name=Siddhant%20Bansal&age=24")
+	fmt.Println(resp)
 }

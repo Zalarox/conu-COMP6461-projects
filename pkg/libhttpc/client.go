@@ -2,7 +2,6 @@ package libhttpc
 
 import (
 	"fmt"
-	"golang.org/x/tools/go/ssa/interp/testdata/src/errors"
 	"io"
 	"net"
 	"net/url"
@@ -10,6 +9,7 @@ import (
 
 const ProtocolVersion = "HTTP/1.0"
 const CRLF = "\r\n"
+const BlankString = ""
 
 type Header map[string]string
 
@@ -22,26 +22,76 @@ type Response struct {
 	Header        Header
 	Body          io.ReadCloser
 	ContentLength int64
-	// add more on the fly should there be need
 }
 
-type Request struct {
-	Method        string
-	URL           string
-	Proto         string
-	Header        Header
-	Body          io.ReadCloser
-	ContentLength int64
-	Host          string
-	// add more on the fly should there be need
+func Get(inputUrl string, headers Header) (string, error) {
+	parsedURL, parsedHeaders, conn, err := connectHandler(inputUrl, headers)
+	defer conn.Close()
+
+	if err != nil {
+		return BlankString, err
+	}
+
+	requestString := fmt.Sprintf("GET %s %s%s%s%s%s", parsedURL.RequestURI(), ProtocolVersion, CRLF, parsedHeaders, CRLF, CRLF)
+	fmt.Fprintf(conn, requestString)
+
+	response, err := readResponseFromConnection(conn)
+
+	if err != nil {
+		return "", nil
+	}
+
+	return string(response), nil
 }
 
-func Get(inputUrl string, headers Header) (*Response, error) {
+func Post(inputUrl string, headers Header, body []byte) (string, error) {
+	headers["Content-Length"] = fmt.Sprintf("%d", len(body))
+	parsedURL, parsedHeaders, conn, err := connectHandler(inputUrl, headers)
+	defer conn.Close()
+
+	if err != nil {
+		return BlankString, err
+	}
+
+	requestString := fmt.Sprintf("POST %s %s%s%s%s%s%s%s", parsedURL.RequestURI(), ProtocolVersion, CRLF, parsedHeaders, CRLF, body, CRLF)
+	fmt.Fprintf(conn, requestString)
+
+	response, err := readResponseFromConnection(conn)
+
+	if err != nil {
+		return "", nil
+	}
+
+	return string(response), nil
+}
+
+func readResponseFromConnection(conn net.Conn) ([]byte, error) {
+	temp := make([]byte, 1024)
+	data := make([]byte, 0)
+	length := 0
+
+	for {
+		n, err := conn.Read(temp)
+		if err != nil {
+			if err != io.EOF {
+				return nil, err
+			}
+			break
+		}
+
+		data = append(data, temp[:n]...)
+		length += n
+	}
+
+	return data, nil
+}
+
+func connectHandler(inputUrl string, headers Header) (*url.URL, string, net.Conn, error) {
 	parsedURL, error := url.Parse(inputUrl)
 	parsedHeaders := stringifyHeaders(headers)
 
 	if error != nil {
-		//
+		return nil, "", nil, error
 	}
 
 	port := parsedURL.Port()
@@ -52,18 +102,7 @@ func Get(inputUrl string, headers Header) (*Response, error) {
 	host := fmt.Sprintf("%s:%s", parsedURL.Hostname(), port)
 
 	conn, err := net.Dial("tcp", host)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("Failed to create a TCP connection")
-	}
-	recvBuf := make([]byte, 1024)
-	requestString := fmt.Sprintf("GET %s %s%s%s%s%s", parsedURL.RequestURI(), ProtocolVersion, CRLF, parsedHeaders, CRLF, CRLF)
-	fmt.Fprintf(conn, requestString)
-	n, err := conn.Read(recvBuf[:])
-	if n > 0 {
-		fmt.Println("From server -- " + string(recvBuf))
-	}
-	return nil, nil
+	return parsedURL, parsedHeaders, conn, err
 }
 
 func stringifyHeaders(headers Header) string {
@@ -72,41 +111,4 @@ func stringifyHeaders(headers Header) string {
 		headersString += fmt.Sprintf("%s:%s%s", headerKey, headerValue, CRLF)
 	}
 	return headersString
-}
-
-func Post(inputUrl string, headers Header, body []byte) (*Response, error) {
-	parsedURL, err := url.Parse(inputUrl)
-	headers["Content-Length"] = fmt.Sprintf("%d", len(body))
-	parsedHeaders := stringifyHeaders(headers)
-
-	if err != nil {
-		//
-	}
-
-	port := parsedURL.Port()
-	if port == "" {
-		port = "80"
-	}
-
-	host := fmt.Sprintf("%s:%s", parsedURL.Hostname(), port)
-
-	conn, err := net.Dial("tcp", host)
-	if err != nil {
-		fmt.Println(err)
-		return nil, errors.New("Failed to create a TCP connection")
-	}
-	recvBuf := make([]byte, 1024)
-	requestString := fmt.Sprintf("POST %s %s%s%s%s%s%s%s", parsedURL.RequestURI(), ProtocolVersion, CRLF, parsedHeaders, CRLF, CRLF, body, CRLF)
-	fmt.Println(requestString)
-	fmt.Fprintf(conn, requestString)
-	n, err := conn.Read(recvBuf[:])
-	if n > 0 {
-		fmt.Println("From server -- " + string(recvBuf))
-	}
-	conn.Close()
-	return nil, nil
-}
-
-func executeRequest() (*Response, error) {
-	return nil, nil
 }
