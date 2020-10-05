@@ -27,7 +27,7 @@ func parseArgs() {
 
 	var headerPtr flagList
 
-	verbosePtr := cmdHttpc.Bool("v", true, libhttpc.HelpTextVerbose)
+	verbosePtr := cmdHttpc.Bool("v", false, libhttpc.HelpTextVerbose)
 	dataPtr := cmdHttpc.String("d", libhttpc.BlankString, libhttpc.HelpTextData)
 	filePtr := cmdHttpc.String("f", libhttpc.BlankString, libhttpc.HelpTextFile)
 	cmdHttpc.Var(&headerPtr, "h", libhttpc.HelpTextHeader)
@@ -56,24 +56,47 @@ func parseArgs() {
 	default:
 
 		fmt.Println(cmdHttpc.Args())
+		_ = cmdHttpc.Parse(os.Args[2:])
+		headers := map[string]string{}
+		url := ""
+		tail := cmdHttpc.Args()
 
 		method := os.Args[1]
 		if strings.ToLower(method) == "get" {
-			fmt.Println("Got GET")
+			for _, headerString := range headerPtr {
+				headerSet := strings.Split(headerString, ":")
+				headers[headerSet[0]] = headerSet[1]
+			}
+			//fmt.Println("file:", *filePtr)
+
+			url := ""
+			if len(tail) != 0 {
+				url = cmdHttpc.Args()[0]
+			} else {
+				fmt.Println(libhttpc.HelpTextGet)
+			}
+
+			res, _ := libhttpc.Get(url, headers, *verbosePtr)
+			response, _ := libhttpc.FromString(res)
+			fmt.Println(response.Body)
+
 		} else if strings.ToLower(method) == "post" {
-			fmt.Println("Got POST")
+			fmt.Println("file:", *filePtr)
+
+			if len(tail) != 0 {
+				url = cmdHttpc.Args()[0]
+			} else {
+				fmt.Println(libhttpc.HelpTextPost)
+			}
+
+			res, _ := libhttpc.Post(url, headers, []byte(*dataPtr), *verbosePtr)
+			response, _ := libhttpc.FromString(res)
+			fmt.Println(response.Body)
+
 		} else {
 			// error
 			fmt.Println("Got INVALID")
 		}
-
-		_ = cmdHttpc.Parse(os.Args[2:])
-
-		fmt.Println("verbose:", *verbosePtr)
-		fmt.Println("header:", headerPtr)
-		fmt.Println("data:", *dataPtr)
-		fmt.Println("file:", *filePtr)
-		fmt.Println("tail:", cmdHttpc.Args())
 	}
 }
 
@@ -85,7 +108,7 @@ func testProgram() {
 	}
 
 	fmt.Println("Making GET request:")
-	resp, err := libhttpc.Get("https://httpbin.org/get", sampleHeaders)
+	resp, err := libhttpc.Get("https://httpbin.org/get", sampleHeaders, true)
 	response, err := libhttpc.FromString(resp)
 	if response != nil {
 		fmt.Println("GET response:")
@@ -100,7 +123,7 @@ func testProgram() {
 	reqBody, _ := json.Marshal(sampleBody)
 
 	fmt.Println("Making POST request:")
-	resp, err = libhttpc.Post("https://httpbin.org/post", sampleHeaders, reqBody)
+	resp, err = libhttpc.Post("https://httpbin.org/post", sampleHeaders, reqBody, true)
 	if err != nil {
 		fmt.Println(err)
 	}
