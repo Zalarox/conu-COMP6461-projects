@@ -43,6 +43,7 @@ Post executes a HTTP POST request for a given URL with inline data or from file.
  -h key:value Associates headers to HTTP Request with the format 'key:value'.
  -d string Associates an inline data to the body HTTP POST request.
  -f file Associates the content of a file to the body HTTP POST request.
+ -o Writes the response out to a file.
 
 Either [-d] or [-f] can be used but not both.`
 
@@ -53,3 +54,7 @@ const HelpTextData = `Associates an inline data to the body HTTP POST request.`
 const HelpTextFile = `Associates the content of a file to the body HTTP POST request.`
 
 const HelpTextHeader = `Associates headers to HTTP Request with the format 'key:value'.`
+
+const HelpTextOutput = `Writes the response of the HTTP request to a file.`
+
+const DefaultRedirectURI = "http://google.com"

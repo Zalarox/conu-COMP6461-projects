@@ -1,10 +1,10 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"httpc/pkg/libhttpc"
+	"io/ioutil"
 	"os"
 	"strings"
 )
@@ -30,6 +30,7 @@ func parseArgs() {
 	verbosePtr := cmdHttpc.Bool("v", false, libhttpc.HelpTextVerbose)
 	dataPtr := cmdHttpc.String("d", libhttpc.BlankString, libhttpc.HelpTextData)
 	filePtr := cmdHttpc.String("f", libhttpc.BlankString, libhttpc.HelpTextFile)
+	outputPtr := cmdHttpc.String("o", libhttpc.BlankString, libhttpc.HelpTextOutput)
 	cmdHttpc.Var(&headerPtr, "h", libhttpc.HelpTextHeader)
 
 	if len(os.Args) == 1 {
@@ -55,87 +56,96 @@ func parseArgs() {
 		}
 	default:
 
-		fmt.Println(cmdHttpc.Args())
 		_ = cmdHttpc.Parse(os.Args[2:])
 		headers := map[string]string{}
 		url := ""
 		tail := cmdHttpc.Args()
-
 		method := os.Args[1]
-		if strings.ToLower(method) == "get" {
-			for _, headerString := range headerPtr {
-				headerSet := strings.Split(headerString, ":")
-				headers[headerSet[0]] = headerSet[1]
-			}
-			//fmt.Println("file:", *filePtr)
 
-			url := ""
+		for _, headerString := range headerPtr {
+			headerSet := strings.Split(headerString, ":")
+			headers[headerSet[0]] = headerSet[1]
+		}
+
+		if strings.ToLower(method) == "get" {
 			if len(tail) != 0 {
-				url = cmdHttpc.Args()[0]
+				url = tail[len(tail)-1]
 			} else {
 				fmt.Println(libhttpc.HelpTextGet)
 			}
 
-			res, _ := libhttpc.Get(url, headers, *verbosePtr)
-			response, _ := libhttpc.FromString(res)
-			fmt.Println(response.Body)
+			res, getErr := libhttpc.Get(url, headers, *verbosePtr)
+			if getErr != nil {
+				fmt.Println(getErr)
+				return
+			}
+			response, parsingErr := libhttpc.FromString(res)
+			if parsingErr != nil {
+				fmt.Println(parsingErr)
+				return
+			}
+
+			if response.StatusCode >= 300 && response.StatusCode <= 302 {
+				response = handleRedirects(response, libhttpc.DefaultRedirectURI, headers, *verbosePtr, 0)
+			}
+
+			if *outputPtr != "" {
+				ioutil.WriteFile(*outputPtr, []byte(response.Body), os.FileMode(os.O_RDWR))
+			} else {
+				fmt.Println(response.Body)
+			}
 
 		} else if strings.ToLower(method) == "post" {
-			fmt.Println("file:", *filePtr)
+			requestBody := []byte(*dataPtr)
+
+			if *filePtr != "" && len(requestBody) == 0 {
+				fileContent, err := ioutil.ReadFile(*filePtr)
+				if err != nil {
+					fmt.Println(err)
+					return
+				}
+				requestBody = fileContent
+			}
 
 			if len(tail) != 0 {
-				url = cmdHttpc.Args()[0]
+				url = tail[len(tail)-1]
 			} else {
 				fmt.Println(libhttpc.HelpTextPost)
 			}
 
-			res, _ := libhttpc.Post(url, headers, []byte(*dataPtr), *verbosePtr)
-			response, _ := libhttpc.FromString(res)
-			fmt.Println(response.Body)
+			res, postErr := libhttpc.Post(url, headers, requestBody, *verbosePtr)
+			if postErr != nil {
+				fmt.Println(postErr)
+				return
+			}
+			response, parsingErr := libhttpc.FromString(res)
+			if parsingErr != nil {
+				fmt.Println(parsingErr)
+				return
+			}
 
+			if *outputPtr != "" {
+				ioutil.WriteFile(*outputPtr, []byte(response.Body), os.FileMode(os.O_RDWR))
+			} else {
+				fmt.Println(response.Body)
+			}
 		} else {
 			// error
-			fmt.Println("Got INVALID")
+			fmt.Println(libhttpc.HelpTextMain)
 		}
 	}
 }
 
-func testProgram() {
-	// 	Sample Headers
-	sampleHeaders := libhttpc.RequestHeader{
-		"Content-Type":  "application/json",
-		"Authorization": "None",
-	}
-
-	fmt.Println("Making GET request:")
-	resp, err := libhttpc.Get("https://httpbin.org/get", sampleHeaders, true)
-	response, err := libhttpc.FromString(resp)
-	if response != nil {
-		fmt.Println("GET response:")
-		fmt.Println(response.Body)
-	}
-
-	// Sample Body
-	sampleBody := map[string]string{
-		"Luke Skywalker": "Peacekeeper",
-	}
-
-	reqBody, _ := json.Marshal(sampleBody)
-
-	fmt.Println("Making POST request:")
-	resp, err = libhttpc.Post("https://httpbin.org/post", sampleHeaders, reqBody, true)
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	response, err = libhttpc.FromString(resp)
-	if response != nil {
-		fmt.Println("POST response:")
-		fmt.Println(response.Body)
+func handleRedirects(response *libhttpc.Response, inputUrl string, headers libhttpc.RequestHeader, isVerbose bool, redirectCount int) *libhttpc.Response {
+	if redirectCount < 5 && response.StatusCode >= 300 && response.StatusCode <= 302 {
+		res, _ := libhttpc.Get(inputUrl, headers, isVerbose)
+		response, _ = libhttpc.FromString(res)
+		return handleRedirects(response, libhttpc.DefaultRedirectURI, headers, isVerbose, redirectCount+1)
+	} else {
+		return response
 	}
 }
 
 func main() {
 	parseArgs()
-	//testProgram()
 }
