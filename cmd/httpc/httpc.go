@@ -7,6 +7,7 @@ import (
 	"httpc/pkg/libhttpc"
 	"io/ioutil"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -109,8 +110,13 @@ func parseArgs() {
 		if strings.ToLower(method) == "get" {
 			if len(tail) != 0 {
 				url = tail[len(tail)-1]
+				match, _ := regexp.MatchString("^http(s?)://", url)
+				if match == false {
+					url = "https://" + url
+				}
 			} else {
 				fmt.Println(libhttpc.HelpTextGet)
+				return
 			}
 
 			res, getErr := libhttpc.Get(url, headers)
@@ -161,8 +167,13 @@ func parseArgs() {
 
 			if len(tail) != 0 {
 				url = tail[len(tail)-1]
+				match, _ := regexp.MatchString("^http(s?)://", url)
+				if match == false {
+					url = "https://" + url
+				}
 			} else {
 				fmt.Println(libhttpc.HelpTextPost)
+				return
 			}
 
 			res, postErr := libhttpc.Post(url, headers, requestBody)
