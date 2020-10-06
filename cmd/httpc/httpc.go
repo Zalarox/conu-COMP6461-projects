@@ -21,6 +21,29 @@ func (flags *flagList) Set(value string) error {
 	return nil
 }
 
+func writeOutput(outputPtr *string, toWrite []byte) {
+	if *outputPtr != "" {
+		err := ioutil.WriteFile(*outputPtr, toWrite, os.FileMode(os.O_RDWR))
+		if err == nil {
+			fmt.Println("Successfully written result to specified file!")
+		} else {
+			fmt.Printf("Error encountered: %s", err.Error())
+		}
+	} else {
+		fmt.Println(string(toWrite))
+	}
+}
+
+func handleRedirects(response *libhttpc.Response, responseString string, inputUrl string, headers libhttpc.RequestHeader, redirectCount int) string {
+	if redirectCount < 5 && response.StatusCode >= 300 && response.StatusCode <= 302 {
+		res, _ := libhttpc.Get(inputUrl, headers)
+		response, _ = libhttpc.FromString(res)
+		return handleRedirects(response, res, libhttpc.DefaultRedirectURI, headers, redirectCount+1)
+	} else {
+		return responseString
+	}
+}
+
 func parseArgs() {
 	cmdHelp := flag.NewFlagSet("help", flag.ExitOnError)
 	cmdHttpc := flag.NewFlagSet("httpc", flag.ExitOnError)
@@ -54,8 +77,8 @@ func parseArgs() {
 				fmt.Println(libhttpc.HelpTextMain)
 			}
 		}
-	default:
 
+	default:
 		_ = cmdHttpc.Parse(os.Args[2:])
 		headers := map[string]string{}
 		url := ""
@@ -74,26 +97,28 @@ func parseArgs() {
 				fmt.Println(libhttpc.HelpTextGet)
 			}
 
-			res, getErr := libhttpc.Get(url, headers, *verbosePtr)
+			res, getErr := libhttpc.Get(url, headers)
+
 			if getErr != nil {
-				fmt.Println(getErr)
+				writeOutput(outputPtr, []byte(getErr.Error()))
 				return
 			}
 			response, parsingErr := libhttpc.FromString(res)
 			if parsingErr != nil {
-				fmt.Println(parsingErr)
+				writeOutput(outputPtr, []byte(parsingErr.Error()))
 				return
 			}
 
 			if response.StatusCode >= 300 && response.StatusCode <= 302 {
-				response = handleRedirects(response, libhttpc.DefaultRedirectURI, headers, *verbosePtr, 0)
+				res = handleRedirects(response, res, libhttpc.DefaultRedirectURI, headers, 0)
 			}
 
-			if *outputPtr != "" {
-				ioutil.WriteFile(*outputPtr, []byte(response.Body), os.FileMode(os.O_RDWR))
-			} else {
-				fmt.Println(response.Body)
+			if *verbosePtr {
+				writeOutput(outputPtr, []byte(res))
+				return
 			}
+
+			writeOutput(outputPtr, []byte(response.Body))
 
 		} else if strings.ToLower(method) == "post" {
 			requestBody := []byte(*dataPtr)
@@ -113,36 +138,27 @@ func parseArgs() {
 				fmt.Println(libhttpc.HelpTextPost)
 			}
 
-			res, postErr := libhttpc.Post(url, headers, requestBody, *verbosePtr)
+			res, postErr := libhttpc.Post(url, headers, requestBody)
+			if *verbosePtr {
+				writeOutput(outputPtr, []byte(res))
+				return
+			}
+
 			if postErr != nil {
-				fmt.Println(postErr)
+				writeOutput(outputPtr, []byte(postErr.Error()))
 				return
 			}
 			response, parsingErr := libhttpc.FromString(res)
 			if parsingErr != nil {
-				fmt.Println(parsingErr)
+				writeOutput(outputPtr, []byte(parsingErr.Error()))
 				return
 			}
 
-			if *outputPtr != "" {
-				ioutil.WriteFile(*outputPtr, []byte(response.Body), os.FileMode(os.O_RDWR))
-			} else {
-				fmt.Println(response.Body)
-			}
+			writeOutput(outputPtr, []byte(response.Body))
 		} else {
 			// error
 			fmt.Println(libhttpc.HelpTextMain)
 		}
-	}
-}
-
-func handleRedirects(response *libhttpc.Response, inputUrl string, headers libhttpc.RequestHeader, isVerbose bool, redirectCount int) *libhttpc.Response {
-	if redirectCount < 5 && response.StatusCode >= 300 && response.StatusCode <= 302 {
-		res, _ := libhttpc.Get(inputUrl, headers, isVerbose)
-		response, _ = libhttpc.FromString(res)
-		return handleRedirects(response, libhttpc.DefaultRedirectURI, headers, isVerbose, redirectCount+1)
-	} else {
-		return response
 	}
 }
 

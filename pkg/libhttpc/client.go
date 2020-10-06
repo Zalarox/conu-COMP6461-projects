@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-func Get(inputUrl string, headers RequestHeader, isVerbose bool) (string, error) {
+func Get(inputUrl string, headers RequestHeader) (string, error) {
 	parsedURL, parsedHeaders, conn, err := connectHandler(inputUrl, headers)
 
 	if err != nil {
@@ -17,17 +17,12 @@ func Get(inputUrl string, headers RequestHeader, isVerbose bool) (string, error)
 	}
 
 	defer conn.Close()
-
 	requestString := fmt.Sprintf(
 		"GET %s %s%s%s%s%s",
 		parsedURL.RequestURI(), ProtocolVersion, CRLF,
 		parsedHeaders, CRLF, CRLF)
 
 	fmt.Fprintf(conn, requestString)
-
-	if isVerbose {
-		fmt.Println(requestString)
-	}
 
 	response, err := readResponseFromConnection(conn)
 
@@ -38,7 +33,7 @@ func Get(inputUrl string, headers RequestHeader, isVerbose bool) (string, error)
 	return string(response), nil
 }
 
-func Post(inputUrl string, headers RequestHeader, body []byte, isVerbose bool) (string, error) {
+func Post(inputUrl string, headers RequestHeader, body []byte) (string, error) {
 	headers["Content-Length"] = fmt.Sprintf("%d", len(body))
 	parsedURL, parsedHeaders, conn, err := connectHandler(inputUrl, headers)
 
@@ -52,10 +47,6 @@ func Post(inputUrl string, headers RequestHeader, body []byte, isVerbose bool) (
 		parsedURL.RequestURI(), ProtocolVersion, CRLF,
 		parsedHeaders, CRLF, body, CRLF)
 	fmt.Fprintf(conn, requestString)
-
-	if isVerbose {
-		fmt.Println(requestString)
-	}
 
 	response, err := readResponseFromConnection(conn)
 
