@@ -23,7 +23,6 @@ func Get(inputUrl string, headers RequestHeader) (string, error) {
 		parsedHeaders, CRLF, CRLF)
 
 	fmt.Fprintf(conn, requestString)
-
 	response, err := readResponseFromConnection(conn)
 
 	if err != nil {
@@ -86,6 +85,22 @@ func FromString(response string) (*Response, error) {
 		return &response, nil
 	}
 	return nil, nil
+}
+
+func ExtractRedirectURI(headers string) string {
+	headerLines := strings.Split(headers, "\n")
+	for _, header := range headerLines {
+		indexOfSeparator := strings.Index(header, ":")
+		if indexOfSeparator > -1 {
+			if header[:indexOfSeparator] == "Location" {
+				uri := strings.TrimSpace(strings.TrimSuffix(strings.TrimSuffix(header[indexOfSeparator+1:], "\r"), "\n"))
+				return uri
+			}
+		} else {
+			break
+		}
+	}
+	return ""
 }
 
 func parseStatusCode(statusCode string) (int, error) {

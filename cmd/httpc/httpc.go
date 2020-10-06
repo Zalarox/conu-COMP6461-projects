@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"httpc/pkg/libhttpc"
@@ -25,7 +26,7 @@ func writeOutput(outputPtr *string, toWrite []byte) {
 	if *outputPtr != "" {
 		err := ioutil.WriteFile(*outputPtr, toWrite, os.FileMode(os.O_RDWR))
 		if err == nil {
-			fmt.Println("Successfully written result to specified file!")
+			fmt.Printf("Successfully written result to %s\n", *outputPtr)
 		} else {
 			fmt.Printf("Error encountered: %s", err.Error())
 		}
@@ -34,14 +35,29 @@ func writeOutput(outputPtr *string, toWrite []byte) {
 	}
 }
 
-func handleRedirects(response *libhttpc.Response, responseString string, inputUrl string, headers libhttpc.RequestHeader, redirectCount int) string {
-	if redirectCount < 5 && response.StatusCode >= 300 && response.StatusCode <= 302 {
-		res, _ := libhttpc.Get(inputUrl, headers)
-		response, _ = libhttpc.FromString(res)
-		return handleRedirects(response, res, libhttpc.DefaultRedirectURI, headers, redirectCount+1)
-	} else {
-		return responseString
+func handleRedirects(response *libhttpc.Response, responseString string, headers libhttpc.RequestHeader, redirectCount int) (string, error) {
+	var err error
+	for ; redirectCount < 5; redirectCount++ {
+		if response.StatusCode >= 301 && response.StatusCode <= 303 {
+			redirectURI := libhttpc.ExtractRedirectURI(response.Headers)
+			if redirectURI != "" {
+				responseString, err = libhttpc.Get(redirectURI, headers)
+				if err != nil {
+					return "", err
+				}
+
+				response, err = libhttpc.FromString(responseString)
+				if err != nil {
+					return "", err
+				}
+			} else {
+				return "", errors.New("Bad redirect URI in Location header")
+			}
+		} else {
+			return responseString, nil
+		}
 	}
+	return "", errors.New("Exceeded 5 redirects!")
 }
 
 func parseArgs() {
@@ -110,7 +126,18 @@ func parseArgs() {
 			}
 
 			if response.StatusCode >= 300 && response.StatusCode <= 302 {
-				res = handleRedirects(response, res, libhttpc.DefaultRedirectURI, headers, 0)
+				resString, redirectErr := handleRedirects(response, res, headers, 0)
+				if redirectErr != nil {
+					writeOutput(outputPtr, []byte(redirectErr.Error()))
+					return
+				}
+				res = resString
+				responseAfterRedirect, parsingErr := libhttpc.FromString(res)
+				if parsingErr != nil {
+					writeOutput(outputPtr, []byte(parsingErr.Error()))
+					return
+				}
+				response = responseAfterRedirect
 			}
 
 			if *verbosePtr {
