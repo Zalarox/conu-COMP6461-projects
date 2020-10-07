@@ -1,6 +1,7 @@
 package libhttpc
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -87,7 +88,33 @@ func FromString(response string) (*Response, error) {
 	return nil, nil
 }
 
-func ExtractRedirectURI(headers string) string {
+func HandleRedirects(response *Response, responseString string, headers RequestHeader, redirectCount int) (string, error) {
+	var err error
+	for ; redirectCount < 5; redirectCount++ {
+		if response.StatusCode >= 301 && response.StatusCode <= 303 {
+			redirectURI := extractRedirectURI(response.Headers)
+			fmt.Printf("Encountered status code %d...Redirecting to %s\n", response.StatusCode, redirectURI)
+			if redirectURI != "" {
+				responseString, err = Get(redirectURI, headers)
+				if err != nil {
+					return "", err
+				}
+
+				response, err = FromString(responseString)
+				if err != nil {
+					return "", err
+				}
+			} else {
+				return "", errors.New("Bad redirect URI in Location header")
+			}
+		} else {
+			return responseString, nil
+		}
+	}
+	return "", errors.New("Exceeded 5 redirects!")
+}
+
+func extractRedirectURI(headers string) string {
 	headerLines := strings.Split(headers, "\n")
 	for _, header := range headerLines {
 		indexOfSeparator := strings.Index(header, ":")

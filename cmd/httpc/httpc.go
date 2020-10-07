@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"httpc/pkg/libhttpc"
@@ -34,31 +33,6 @@ func writeOutput(outputPtr *string, toWrite []byte) {
 	} else {
 		fmt.Println(string(toWrite))
 	}
-}
-
-func handleRedirects(response *libhttpc.Response, responseString string, headers libhttpc.RequestHeader, redirectCount int) (string, error) {
-	var err error
-	for ; redirectCount < 5; redirectCount++ {
-		if response.StatusCode >= 301 && response.StatusCode <= 303 {
-			redirectURI := libhttpc.ExtractRedirectURI(response.Headers)
-			if redirectURI != "" {
-				responseString, err = libhttpc.Get(redirectURI, headers)
-				if err != nil {
-					return "", err
-				}
-
-				response, err = libhttpc.FromString(responseString)
-				if err != nil {
-					return "", err
-				}
-			} else {
-				return "", errors.New("Bad redirect URI in Location header")
-			}
-		} else {
-			return responseString, nil
-		}
-	}
-	return "", errors.New("Exceeded 5 redirects!")
 }
 
 func parseArgs() {
@@ -132,7 +106,7 @@ func parseArgs() {
 			}
 
 			if response.StatusCode >= 300 && response.StatusCode <= 302 {
-				resString, redirectErr := handleRedirects(response, res, headers, 0)
+				resString, redirectErr := libhttpc.HandleRedirects(response, res, headers, 0)
 				if redirectErr != nil {
 					writeOutput(outputPtr, []byte(redirectErr.Error()))
 					return
