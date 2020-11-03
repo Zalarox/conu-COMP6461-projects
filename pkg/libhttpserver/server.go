@@ -1,52 +1,46 @@
 package libhttpserver
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
+	"log"
 	"net"
 )
 
-//
-//func dropCR(data []byte) []byte {
-//	if len(data) > 0 && data[len(data)-1] == '\r' {
-//		return data[0 : len(data)-1]
-//	}
-//	return data
-//}
+func readResponseFromConnection(conn net.Conn) ([]byte, error) {
+	temp := make([]byte, 1024)
+	data := make([]byte, 0)
+	length := 0
 
-func ScanCRLF(data []byte, atEOF bool) (advance int, token []byte, err error) {
-	if atEOF && len(data) == 0 {
-		return 0, nil, nil
+	for {
+		n, err := conn.Read(temp)
+		if err != nil {
+			break
+		}
+
+		data = append(data, temp[:n]...)
+		length += n
+		if n < 1024 {
+			break
+		}
 	}
-	if i := bytes.Index(data, []byte{'\r', '\n'}); i >= 0 {
-		// We have a full newline-terminated line.
-		return i + 2, data[0:i], nil
-	}
-	// If we're at EOF, we have a final, non-terminated line. Return it.
-	if atEOF {
-		return len(data), data, nil
-	}
-	// Request more data.
-	return 0, nil, nil
+
+	return data, nil
 }
 
-func handleConnection(curConn net.Conn) string {
+func handleConnection(curConn net.Conn) {
 	fmt.Printf("Handling client %s\n", curConn.RemoteAddr().String())
 	defer curConn.Close()
 
-	reader := bufio.NewReader(curConn)
-	scanner := bufio.NewScanner(reader)
-	scanner.Split(ScanCRLF)
-	responseData := ""
+	responseData, err := readResponseFromConnection(curConn)
 
-	for scanner.Scan() {
-		responseData += scanner.Text()
+	if err != nil {
+		log.Fatalln(err)
 	}
 
-	fmt.Println(responseData)
-
-	return responseData
+	_, writeErr := curConn.Write(responseData)
+	if writeErr != nil {
+		log.Fatalln(writeErr)
+	}
 }
 
 func StartServer(port string, directory string, verbose bool) {
