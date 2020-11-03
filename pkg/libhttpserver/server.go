@@ -4,51 +4,49 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"io"
 	"net"
 )
 
-func Read(conn net.Conn) (string, error) {
-	reader := bufio.NewReader(conn)
-	var buffer bytes.Buffer
-	for {
-		ba, _, err := reader.ReadLine()
-		if err != nil {
-			// if the error is an End Of File this is still good
-			if err == io.EOF {
-				break
-			}
-			return "", err
-		}
-		buffer.Write(ba)
-		//if !isPrefix {
-		//	break
-		//}
+//
+//func dropCR(data []byte) []byte {
+//	if len(data) > 0 && data[len(data)-1] == '\r' {
+//		return data[0 : len(data)-1]
+//	}
+//	return data
+//}
+
+func ScanCRLF(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
 	}
-	return buffer.String(), nil
+	if i := bytes.Index(data, []byte{'\r', '\n'}); i >= 0 {
+		// We have a full newline-terminated line.
+		return i + 2, data[0:i], nil
+	}
+	// If we're at EOF, we have a final, non-terminated line. Return it.
+	if atEOF {
+		return len(data), data, nil
+	}
+	// Request more data.
+	return 0, nil, nil
 }
 
-func handleConnection(curConn net.Conn) {
+func handleConnection(curConn net.Conn) string {
 	fmt.Printf("Handling client %s\n", curConn.RemoteAddr().String())
+	defer curConn.Close()
 
-	data, err := Read(curConn)
-	//connData, err := bufio.NewReader(curConn).ReadString('\n')
-	if err != nil {
-		fmt.Println(err)
-		return
+	reader := bufio.NewReader(curConn)
+	scanner := bufio.NewScanner(reader)
+	scanner.Split(ScanCRLF)
+	responseData := ""
+
+	for scanner.Scan() {
+		responseData += scanner.Text()
 	}
 
-	fmt.Println(data)
+	fmt.Println(responseData)
 
-	//temp := strings.TrimSpace(string(connData))
-
-	//if temp == "STOP" {
-	//	break
-	//}
-
-	//result := strconv.Itoa(random()) + "\n"
-	//curConn.Write([]byte(string(result)))
-	curConn.Close()
+	return responseData
 }
 
 func StartServer(port string, directory string, verbose bool) {
