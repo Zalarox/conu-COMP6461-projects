@@ -7,6 +7,7 @@ import (
 )
 
 func myFunc(reqData *libhttpserver.Request) string {
+	// structure as a valid HTTP response
 	return "My Response!"
 }
 
