@@ -48,6 +48,9 @@ func Post(inputUrl string, headers RequestHeader, body []byte) (string, error) {
 		parsedHeaders, CRLF, body, CRLF)
 	fmt.Fprintf(conn, requestString)
 
+	fmt.Println("Here you go.")
+	fmt.Println(requestString)
+
 	response, err := readResponseFromConnection(conn)
 
 	if err != nil {

@@ -12,7 +12,9 @@ const HelpTextPort = `Specifies the port number that the server will listen and 
 const buffSize = 1024
 const blankString = ""
 
-type handlerFn func(request *Request) (string, int, string)
+type handlerFn func(request *Request, pathParam *string, root *string) (string, int, string)
+
+var rootDirectory string
 
 var reasonPhrase = map[int]string{
 	200: "OK",

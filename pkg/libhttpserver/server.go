@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"strings"
 )
 
@@ -29,6 +30,14 @@ func readRequestFromConnection(conn net.Conn) ([]byte, error) {
 	return data, nil
 }
 
+func findRoute(parsedRequest *Request) (handlerFn, string) {
+	paths := strings.Split(parsedRequest.route, "/")
+	if len(paths) > 2 {
+		return routeMap[parsedRequest.method]["/"], parsedRequest.route
+	}
+	return routeMap[parsedRequest.method]["/"], paths[len(paths)-1]
+}
+
 func handleConnection(curConn net.Conn) {
 	fmt.Printf("Handling client %s\n", curConn.RemoteAddr().String())
 	defer curConn.Close()
@@ -46,10 +55,10 @@ func handleConnection(curConn net.Conn) {
 	handler := routeMap[parsedRequest.method][parsedRequest.route]
 
 	if handler != nil {
-		response, statusCode, headers = handler(parsedRequest)
+		response, statusCode, headers = handler(parsedRequest, nil, &rootDirectory)
 	} else {
-		log.Fatalln("No Registered Handler!")
-		return
+		handler, pathParam := findRoute(parsedRequest)
+		response, statusCode, headers = handler(parsedRequest, &pathParam, &rootDirectory)
 	}
 
 	httpResponse := constructStructuredResponse(response, statusCode, headers)
@@ -103,6 +112,12 @@ func RegisterHandler(method string, route string, handler handlerFn) {
 func StartServer(port string, directory string, verbose bool) {
 	listener, err := net.Listen("tcp", port)
 
+	if _, err := os.Stat(directory); os.IsNotExist(err) {
+		log.Fatal("Directory not found.")
+	}
+
+	rootDirectory = directory
+
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -112,6 +127,8 @@ func StartServer(port string, directory string, verbose bool) {
 
 	for {
 		curConn, err := listener.Accept()
+		fmt.Println(curConn.LocalAddr())
+		fmt.Println(curConn.RemoteAddr())
 		if err != nil {
 			fmt.Println(err)
 			return
