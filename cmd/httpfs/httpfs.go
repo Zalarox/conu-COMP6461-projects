@@ -6,6 +6,10 @@ import (
 	"httpc/pkg/libhttpserver"
 )
 
+func myFunc(reqData *libhttpserver.Request) string {
+	return "My Response!"
+}
+
 func parseArgs() {
 	verbosePtr := flag.Bool("v", false, libhttpserver.HelpTextVerbose)
 	dirPtr := flag.String("d", "/", libhttpserver.HelpTextDir)
@@ -19,6 +23,7 @@ func parseArgs() {
 	PORT := ":" + *portPtr
 	fmt.Println("PORT:", PORT)
 
+	libhttpserver.RegisterHandler("POST", "/", myFunc)
 	libhttpserver.StartServer(PORT, *dirPtr, *verbosePtr)
 }
 

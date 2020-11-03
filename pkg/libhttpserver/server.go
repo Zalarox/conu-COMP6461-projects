@@ -4,22 +4,24 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 )
 
-func readResponseFromConnection(conn net.Conn) ([]byte, error) {
-	temp := make([]byte, 1024)
+func readRequestFromConnection(conn net.Conn) ([]byte, error) {
+	temp := make([]byte, buffSize)
 	data := make([]byte, 0)
 	length := 0
 
 	for {
 		n, err := conn.Read(temp)
+
 		if err != nil {
 			break
 		}
 
 		data = append(data, temp[:n]...)
 		length += n
-		if n < 1024 {
+		if n < buffSize {
 			break
 		}
 	}
@@ -31,16 +33,58 @@ func handleConnection(curConn net.Conn) {
 	fmt.Printf("Handling client %s\n", curConn.RemoteAddr().String())
 	defer curConn.Close()
 
-	responseData, err := readResponseFromConnection(curConn)
+	requestData, err := readRequestFromConnection(curConn)
+	var response string
 
 	if err != nil {
 		log.Fatalln(err)
 	}
 
-	_, writeErr := curConn.Write(responseData)
+	parsedRequest := parseRequestData(string(requestData))
+	handler := routeMap[parsedRequest.method][parsedRequest.route]
+
+	if handler != nil {
+		response = handler(parsedRequest)
+	} else {
+		log.Fatalln("No Registered Handler!")
+		return
+	}
+
+	_, writeErr := curConn.Write([]byte(response))
 	if writeErr != nil {
 		log.Fatalln(writeErr)
 	}
+}
+
+func parseRequestData(request string) *Request {
+	requestLines := strings.Split(request, CRLF)
+	cleanedRequestLines := []string{}
+	parsedRequest := Request{}
+
+	for _, line := range requestLines {
+		if line != blankString {
+			cleanedRequestLines = append(cleanedRequestLines, line)
+		}
+	}
+
+	firstReqLine := strings.Split(cleanedRequestLines[0], " ")
+	parsedRequest.route = firstReqLine[1]
+
+	if strings.Contains(cleanedRequestLines[0], "POST") {
+		parsedRequest.method = "POST"
+		parsedRequest.body = &cleanedRequestLines[len(cleanedRequestLines)-1]
+	} else {
+		parsedRequest.method = "GET"
+	}
+
+	return &parsedRequest
+}
+
+func RegisterHandler(method string, route string, handler handlerFn) {
+	if routeMap[method] == nil {
+		routeMap[method] = map[string]handlerFn{}
+	}
+	routeMap[method][route] = handler
 }
 
 func StartServer(port string, directory string, verbose bool) {
