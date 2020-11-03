@@ -6,9 +6,11 @@ import (
 	"httpc/pkg/libhttpserver"
 )
 
-func myFunc(reqData *libhttpserver.Request) string {
-	// structure as a valid HTTP response
-	return "My Response!"
+func myFunc(reqData *libhttpserver.Request) (string, int, string) {
+	responseBody := "My Response!"
+	bodyLength := fmt.Sprintf("Content-Length:%d", len(responseBody))
+	responseHeaders := fmt.Sprintf("%s%s%s%s", "Authorization:None", libhttpserver.CRLF, bodyLength, libhttpserver.CRLF)
+	return responseBody, 200, responseHeaders
 }
 
 func parseArgs() {

@@ -35,6 +35,8 @@ func handleConnection(curConn net.Conn) {
 
 	requestData, err := readRequestFromConnection(curConn)
 	var response string
+	var statusCode int
+	var headers string
 
 	if err != nil {
 		log.Fatalln(err)
@@ -44,16 +46,23 @@ func handleConnection(curConn net.Conn) {
 	handler := routeMap[parsedRequest.method][parsedRequest.route]
 
 	if handler != nil {
-		response = handler(parsedRequest)
+		response, statusCode, headers = handler(parsedRequest)
 	} else {
 		log.Fatalln("No Registered Handler!")
 		return
 	}
 
-	_, writeErr := curConn.Write([]byte(response))
+	httpResponse := constructStructuredResponse(response, statusCode, headers)
+
+	_, writeErr := curConn.Write([]byte(httpResponse))
 	if writeErr != nil {
 		log.Fatalln(writeErr)
 	}
+}
+
+func constructStructuredResponse(response string, statusCode int, headers string) string {
+	statusLine := fmt.Sprintf("HTTP/1.0 %d %s %s", statusCode, reasonPhrase[statusCode], CRLF)
+	return fmt.Sprintf("%s%s%s%s", statusLine, headers, CRLF, response)
 }
 
 func parseRequestData(request string) *Request {
@@ -72,9 +81,13 @@ func parseRequestData(request string) *Request {
 
 	if strings.Contains(cleanedRequestLines[0], "POST") {
 		parsedRequest.method = "POST"
+		headers := strings.Join(cleanedRequestLines[1:len(cleanedRequestLines)-2], CRLF)
+		parsedRequest.headers = &headers
 		parsedRequest.body = &cleanedRequestLines[len(cleanedRequestLines)-1]
 	} else {
 		parsedRequest.method = "GET"
+		headers := strings.Join(cleanedRequestLines[1:len(cleanedRequestLines)-1], CRLF)
+		parsedRequest.headers = &headers
 	}
 
 	return &parsedRequest
