@@ -35,17 +35,29 @@ func makeHeaders(responseBody string, responseHeaders []string) string {
 
 func getHandler(reqData *libhttpserver.Request, pathParam *string, root *string) (string, int, string) {
 
-	if pathParam == nil {
-		files := listFiles(*root)
-		body := strings.Join(files, ",")
-		responseHeaders := makeHeaders(body, []string{})
-		return body, 200, responseHeaders
-	}
+	if reqData.Method == "GET" {
+		if pathParam == nil {
+			files := listFiles(*root)
+			body := strings.Join(files, ",")
+			responseHeaders := makeHeaders(body, []string{})
+			return body, 200, responseHeaders
+		}
 
-	if strings.Contains(*pathParam, "/") {
-		return "", 403, ""
-	}
+		if strings.Contains(*pathParam, "/") {
+			return "", 403, ""
+		}
 
+		dat, err := ioutil.ReadFile(*root + "\\" + *pathParam)
+		if err != nil {
+			return "", 404, ""
+		}
+		return string(dat), 200, ""
+	} else if reqData.Method == "POST" {
+		err := ioutil.WriteFile(*root+"\\"+*pathParam, []byte(*reqData.Body), 0644)
+		if err != nil {
+			return "", 200, ""
+		}
+	}
 	return "", 200, ""
 	//responseBody, responseHeaders :=
 	//return responseBody, 200, responseHeaders

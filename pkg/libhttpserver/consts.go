@@ -35,10 +35,10 @@ var reasonPhrase = map[int]string{
 }
 
 type Request struct {
-	method  string
+	Method  string
 	route   string
 	headers *string
-	body    *string
+	Body    *string
 }
 
 var routeMap = map[string]map[string]handlerFn{}

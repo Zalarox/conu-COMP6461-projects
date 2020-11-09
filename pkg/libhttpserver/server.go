@@ -33,9 +33,9 @@ func readRequestFromConnection(conn net.Conn) ([]byte, error) {
 func findRoute(parsedRequest *Request) (handlerFn, string) {
 	paths := strings.Split(parsedRequest.route, "/")
 	if len(paths) > 2 {
-		return routeMap[parsedRequest.method]["/"], parsedRequest.route
+		return routeMap[parsedRequest.Method]["/"], parsedRequest.route
 	}
-	return routeMap[parsedRequest.method]["/"], paths[len(paths)-1]
+	return routeMap[parsedRequest.Method]["/"], paths[len(paths)-1]
 }
 
 func handleConnection(curConn net.Conn) {
@@ -52,7 +52,7 @@ func handleConnection(curConn net.Conn) {
 	}
 
 	parsedRequest := parseRequestData(string(requestData))
-	handler := routeMap[parsedRequest.method][parsedRequest.route]
+	handler := routeMap[parsedRequest.Method][parsedRequest.route]
 
 	if handler != nil {
 		response, statusCode, headers = handler(parsedRequest, nil, &rootDirectory)
@@ -71,7 +71,7 @@ func handleConnection(curConn net.Conn) {
 
 func constructStructuredResponse(response string, statusCode int, headers string) string {
 	statusLine := fmt.Sprintf("HTTP/1.0 %d %s %s", statusCode, reasonPhrase[statusCode], CRLF)
-	return fmt.Sprintf("%s%s%s%s", statusLine, headers, CRLF, response)
+	return fmt.Sprintf("%s%s%s%s", statusLine, headers, CRLF+CRLF, response)
 }
 
 func parseRequestData(request string) *Request {
@@ -89,12 +89,12 @@ func parseRequestData(request string) *Request {
 	parsedRequest.route = firstReqLine[1]
 
 	if strings.Contains(cleanedRequestLines[0], "POST") {
-		parsedRequest.method = "POST"
+		parsedRequest.Method = "POST"
 		headers := strings.Join(cleanedRequestLines[1:len(cleanedRequestLines)-2], CRLF)
 		parsedRequest.headers = &headers
-		parsedRequest.body = &cleanedRequestLines[len(cleanedRequestLines)-1]
+		parsedRequest.Body = &cleanedRequestLines[len(cleanedRequestLines)-1]
 	} else {
-		parsedRequest.method = "GET"
+		parsedRequest.Method = "GET"
 		headers := strings.Join(cleanedRequestLines[1:len(cleanedRequestLines)-1], CRLF)
 		parsedRequest.headers = &headers
 	}
