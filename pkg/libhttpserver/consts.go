@@ -42,3 +42,4 @@ type Request struct {
 }
 
 var routeMap = map[string]map[string]handlerFn{}
+var verboseLogging bool

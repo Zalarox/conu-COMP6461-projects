@@ -30,6 +30,12 @@ func readRequestFromConnection(conn net.Conn) ([]byte, error) {
 	return data, nil
 }
 
+func logInfo(logString string) {
+	if verboseLogging {
+		fmt.Println(logString)
+	}
+}
+
 func findRoute(parsedRequest *Request) (handlerFn, string) {
 	paths := strings.Split(parsedRequest.route, "/")
 	if len(paths) > 2 {
@@ -39,7 +45,7 @@ func findRoute(parsedRequest *Request) (handlerFn, string) {
 }
 
 func handleConnection(curConn net.Conn) {
-	fmt.Printf("Handling client %s\n", curConn.RemoteAddr().String())
+	logInfo(fmt.Sprintf("Handling client %s", curConn.RemoteAddr().String()))
 	defer curConn.Close()
 
 	requestData, err := readRequestFromConnection(curConn)
@@ -62,11 +68,11 @@ func handleConnection(curConn net.Conn) {
 	}
 
 	httpResponse := constructStructuredResponse(response, statusCode, headers)
-
 	_, writeErr := curConn.Write([]byte(httpResponse))
 	if writeErr != nil {
 		log.Fatalln(writeErr)
 	}
+	logInfo(fmt.Sprintf("Responded to %s with status code %d", curConn.RemoteAddr().String(), statusCode))
 }
 
 func constructStructuredResponse(response string, statusCode int, headers string) string {
@@ -119,6 +125,7 @@ func StartServer(port string, directory string, verbose bool) {
 	}
 
 	rootDirectory = directory
+	verboseLogging = verbose
 
 	if err != nil {
 		fmt.Println(err)
@@ -129,8 +136,6 @@ func StartServer(port string, directory string, verbose bool) {
 
 	for {
 		curConn, err := listener.Accept()
-		fmt.Println(curConn.LocalAddr())
-		fmt.Println(curConn.RemoteAddr())
 		if err != nil {
 			fmt.Println(err)
 			return

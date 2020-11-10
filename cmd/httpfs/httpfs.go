@@ -47,7 +47,8 @@ func getHandler(reqData *libhttpserver.Request, pathParam *string, root *string)
 		}
 
 		if strings.Contains(*pathParam, "/") {
-			return "", 403, makeHeaders("", []string{})
+			errStr := fmt.Sprintf("Access Forbidden: '%s' is outside server root directory", *pathParam)
+			return errStr, 403, makeHeaders(errStr, []string{})
 		}
 
 		fileMutex.Lock() // LOCK
@@ -78,19 +79,15 @@ func parseArgs() {
 	if err != nil {
 		log.Println(err)
 	}
-	fmt.Println(currDir)
 
 	verbosePtr := flag.Bool("v", false, libhttpserver.HelpTextVerbose)
 	dirPtr := flag.String("d", currDir, libhttpserver.HelpTextDir)
 	portPtr := flag.String("p", "8080", libhttpserver.HelpTextPort)
 
 	flag.Parse()
-	fmt.Println("v:", *verbosePtr)
-	fmt.Println("d:", *dirPtr)
-	fmt.Println("port:", *portPtr)
+	fmt.Printf("Server listening on port: %s\nDirectory Served: %s\nVerbose Logging:%t\n\n", *portPtr, *dirPtr, *verbosePtr)
 
 	PORT := ":" + *portPtr
-	fmt.Println("PORT:", PORT)
 
 	libhttpserver.RegisterHandler("POST", "/", getHandler)
 	libhttpserver.RegisterHandler("GET", "/", getHandler)
