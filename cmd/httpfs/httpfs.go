@@ -47,7 +47,7 @@ func getHandler(reqData *libhttpserver.Request, pathParam *string, root *string)
 			return "", 403, makeHeaders("", []string{})
 		}
 
-		dat, err := ioutil.ReadFile(*root + "\\" + *pathParam)
+		dat, err := ioutil.ReadFile(*root + "/" + *pathParam)
 		if err != nil {
 			errStr := fmt.Sprintf("No file exists with name '%s'", *pathParam)
 			return errStr, 404, makeHeaders(errStr, []string{})
