@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -47,14 +48,14 @@ func getHandler(reqData *libhttpserver.Request, pathParam *string, root *string)
 			return "", 403, makeHeaders("", []string{})
 		}
 
-		dat, err := ioutil.ReadFile(*root + "/" + *pathParam)
+		dat, err := ioutil.ReadFile(filepath.Join(*root, *pathParam))
 		if err != nil {
 			errStr := fmt.Sprintf("No file exists with name '%s'", *pathParam)
 			return errStr, 404, makeHeaders(errStr, []string{})
 		}
 		return string(dat), 200, makeHeaders(string(dat), []string{})
 	} else if reqData.Method == "POST" {
-		err := ioutil.WriteFile(*root+"\\"+*pathParam, []byte(*reqData.Body), 0644)
+		err := ioutil.WriteFile(filepath.Join(*root, *pathParam), []byte(*reqData.Body), 0644)
 		if err != nil {
 			errStr := fmt.Sprintf("Failed to write to file '%s'", *pathParam)
 			return errStr, 500, makeHeaders(errStr, []string{})
