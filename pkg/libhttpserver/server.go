@@ -96,7 +96,7 @@ func parseRequestData(request string) *Request {
 	} else {
 		parsedRequest.Method = "GET"
 		if len(cleanedRequestLines) > 1 {
-			headers := (strings.Join(cleanedRequestLines[1:len(cleanedRequestLines)-1], CRLF))
+			headers := strings.Join(cleanedRequestLines[1:len(cleanedRequestLines)-1], CRLF)
 			parsedRequest.headers = &headers
 		}
 	}
