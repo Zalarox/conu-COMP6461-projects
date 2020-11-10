@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 func listFiles(path string) []string {
@@ -35,6 +36,7 @@ func makeHeaders(responseBody string, responseHeaders []string) string {
 }
 
 func getHandler(reqData *libhttpserver.Request, pathParam *string, root *string) (string, int, string) {
+	var fileMutex sync.Mutex
 
 	if reqData.Method == "GET" {
 		if pathParam == nil {
@@ -48,14 +50,18 @@ func getHandler(reqData *libhttpserver.Request, pathParam *string, root *string)
 			return "", 403, makeHeaders("", []string{})
 		}
 
+		fileMutex.Lock() // LOCK
 		dat, err := ioutil.ReadFile(filepath.Join(*root, *pathParam))
+		fileMutex.Unlock() // UNLOCK
 		if err != nil {
 			errStr := fmt.Sprintf("No file exists with name '%s'", *pathParam)
 			return errStr, 404, makeHeaders(errStr, []string{})
 		}
 		return string(dat), 200, makeHeaders(string(dat), []string{})
 	} else if reqData.Method == "POST" {
+		fileMutex.Lock() // LOCK
 		err := ioutil.WriteFile(filepath.Join(*root, *pathParam), []byte(*reqData.Body), 0644)
+		fileMutex.Unlock() // UNLOCK
 		if err != nil {
 			errStr := fmt.Sprintf("Failed to write to file '%s'", *pathParam)
 			return errStr, 500, makeHeaders(errStr, []string{})
