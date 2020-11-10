@@ -44,23 +44,26 @@ func getHandler(reqData *libhttpserver.Request, pathParam *string, root *string)
 		}
 
 		if strings.Contains(*pathParam, "/") {
-			return "", 403, ""
+			return "", 403, makeHeaders("", []string{})
 		}
 
 		dat, err := ioutil.ReadFile(*root + "\\" + *pathParam)
 		if err != nil {
-			return "", 404, ""
+			errStr := fmt.Sprintf("No file exists with name '%s'", *pathParam)
+			return errStr, 404, makeHeaders(errStr, []string{})
 		}
-		return string(dat), 200, ""
+		return string(dat), 200, makeHeaders(string(dat), []string{})
 	} else if reqData.Method == "POST" {
 		err := ioutil.WriteFile(*root+"\\"+*pathParam, []byte(*reqData.Body), 0644)
 		if err != nil {
-			return "", 200, ""
+			errStr := fmt.Sprintf("Failed to write to file '%s'", *pathParam)
+			return errStr, 500, makeHeaders(errStr, []string{})
+		} else {
+			successStr := "Successfully written content to file"
+			return successStr, 200, makeHeaders(successStr, []string{})
 		}
 	}
-	return "", 200, ""
-	//responseBody, responseHeaders :=
-	//return responseBody, 200, responseHeaders
+	return "", 500, makeHeaders("", []string{})
 }
 
 func parseArgs() {
