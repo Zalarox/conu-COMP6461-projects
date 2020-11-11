@@ -31,8 +31,24 @@ func listFiles(path string) []string {
 func makeHeaders(responseBody string, responseHeaders []string) string {
 	bodyLength := fmt.Sprintf("Content-Length:%d", len(responseBody))
 	responseHeaders = append(responseHeaders, bodyLength)
+	responseHeaders = append(responseHeaders, "Content-Disposition:inline")
 	headers := strings.Join(responseHeaders, libhttpserver.CRLF)
 	return headers
+}
+
+func getTypeHeader(fileType string) string {
+	key := "Content-Type:"
+	switch fileType {
+	case ".txt":
+		return key + "text/plain"
+	case ".json":
+		return key + "application/json"
+	case ".xml":
+		return key + "application/xml"
+	case ".html":
+		return key + "text/html"
+	}
+	return key + "text/plain"
 }
 
 func getHandler(reqData *libhttpserver.Request, pathParam *string, root *string) (string, int, string) {
@@ -53,12 +69,19 @@ func getHandler(reqData *libhttpserver.Request, pathParam *string, root *string)
 
 		fileMutex.Lock() // LOCK
 		dat, err := ioutil.ReadFile(filepath.Join(*root, *pathParam))
+		stringDat := string(dat)
+		stringDat = strings.ReplaceAll(stringDat, "\r\n", "\n")
+		getHeaders := makeHeaders(stringDat, []string{})
+		ext := filepath.Ext(*pathParam)
+		typeHeader := getTypeHeader(ext)
+		getHeaders = getHeaders + libhttpserver.CRLF + typeHeader
+
 		fileMutex.Unlock() // UNLOCK
 		if err != nil {
 			errStr := fmt.Sprintf("No file exists with name '%s'", *pathParam)
 			return errStr, 404, makeHeaders(errStr, []string{})
 		}
-		return string(dat), 200, makeHeaders(string(dat), []string{})
+		return stringDat, 200, getHeaders
 	} else if reqData.Method == "POST" {
 		fileMutex.Lock() // LOCK
 		err := ioutil.WriteFile(filepath.Join(*root, *pathParam), []byte(*reqData.Body), 0644)

@@ -81,7 +81,8 @@ func constructStructuredResponse(response string, statusCode int, headers string
 }
 
 func parseRequestData(request string) *Request {
-	requestLines := strings.Split(request, CRLF)
+	initialSplit := strings.SplitN(request, CRLF+CRLF, 2)
+	requestLines := strings.Split(initialSplit[0], CRLF)
 	cleanedRequestLines := []string{}
 	parsedRequest := Request{}
 
@@ -96,9 +97,9 @@ func parseRequestData(request string) *Request {
 
 	if strings.Contains(cleanedRequestLines[0], "POST") {
 		parsedRequest.Method = "POST"
-		headers := strings.Join(cleanedRequestLines[1:len(cleanedRequestLines)-2], CRLF)
+		headers := strings.Join(cleanedRequestLines[1:len(cleanedRequestLines)], CRLF)
 		parsedRequest.headers = &headers
-		parsedRequest.Body = &cleanedRequestLines[len(cleanedRequestLines)-1]
+		parsedRequest.Body = &initialSplit[1]
 	} else {
 		parsedRequest.Method = "GET"
 		if len(cleanedRequestLines) > 1 {
