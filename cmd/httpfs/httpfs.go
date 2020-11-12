@@ -54,10 +54,11 @@ func getTypeHeader(fileType string) string {
 }
 
 func getHandler(reqData *libhttpserver.Request, pathParam *string, root *string) (string, int, string) {
+
 	fileMutex.Lock() // LOCK
-	libhttpserver.LogInfo("Acquired Lock " + *pathParam)
+	libhttpserver.LogInfo("Acquired Lock")
 	defer func() {
-		libhttpserver.LogInfo("Released Lock " + *pathParam)
+		libhttpserver.LogInfo("Released Lock")
 		fileMutex.Unlock()
 	}() // UNLOCK ON RETURN
 
