@@ -30,9 +30,9 @@ func readRequestFromConnection(conn net.Conn) ([]byte, error) {
 	return data, nil
 }
 
-func logInfo(logString string) {
+func LogInfo(logString string) {
 	if verboseLogging {
-		fmt.Println(logString)
+		log.Println(logString)
 	}
 }
 
@@ -45,7 +45,7 @@ func findRoute(parsedRequest *Request) (handlerFn, string) {
 }
 
 func handleConnection(curConn net.Conn) {
-	logInfo(fmt.Sprintf("Handling client %s", curConn.RemoteAddr().String()))
+	LogInfo(fmt.Sprintf("Handling client %s", curConn.RemoteAddr().String()))
 	defer curConn.Close()
 
 	requestData, err := readRequestFromConnection(curConn)
@@ -72,7 +72,7 @@ func handleConnection(curConn net.Conn) {
 	if writeErr != nil {
 		log.Fatalln(writeErr)
 	}
-	logInfo(fmt.Sprintf("Responded to %s with status code %d", curConn.RemoteAddr().String(), statusCode))
+	LogInfo(fmt.Sprintf("Responded to %s with status code %d", curConn.RemoteAddr().String(), statusCode))
 }
 
 func constructStructuredResponse(response string, statusCode int, headers string) string {

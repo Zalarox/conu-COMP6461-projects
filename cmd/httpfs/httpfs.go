@@ -56,6 +56,7 @@ func getHandler(reqData *libhttpserver.Request, pathParam *string, root *string)
 
 	if reqData.Method == "GET" {
 		if pathParam == nil {
+			libhttpserver.LogInfo("Responding to request for directory listing.")
 			files := listFiles(*root)
 			body := strings.Join(files, ",")
 			responseHeaders := makeHeaders(body, []string{})
@@ -64,6 +65,7 @@ func getHandler(reqData *libhttpserver.Request, pathParam *string, root *string)
 
 		if strings.Contains(*pathParam, "/") {
 			errStr := fmt.Sprintf("Access Forbidden: '%s' is outside server root directory", *pathParam)
+			libhttpserver.LogInfo("Access Denied to request.")
 			return errStr, 403, makeHeaders(errStr, []string{})
 		}
 
@@ -81,6 +83,7 @@ func getHandler(reqData *libhttpserver.Request, pathParam *string, root *string)
 			errStr := fmt.Sprintf("No file exists with name '%s'", *pathParam)
 			return errStr, 404, makeHeaders(errStr, []string{})
 		}
+		libhttpserver.LogInfo("Returning requested file " + *pathParam)
 		return stringDat, 200, getHeaders
 	} else if reqData.Method == "POST" {
 		fileMutex.Lock() // LOCK
@@ -91,6 +94,7 @@ func getHandler(reqData *libhttpserver.Request, pathParam *string, root *string)
 			return errStr, 500, makeHeaders(errStr, []string{})
 		} else {
 			successStr := "Successfully written content to file"
+			libhttpserver.LogInfo("Successfully written out " + *pathParam)
 			return successStr, 200, makeHeaders(successStr, []string{})
 		}
 	}
