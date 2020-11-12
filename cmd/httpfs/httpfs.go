@@ -12,6 +12,8 @@ import (
 	"sync"
 )
 
+var fileMutex sync.Mutex
+
 func listFiles(path string) []string {
 	allFiles, err := ioutil.ReadDir(path)
 	files := []string{}
@@ -52,7 +54,12 @@ func getTypeHeader(fileType string) string {
 }
 
 func getHandler(reqData *libhttpserver.Request, pathParam *string, root *string) (string, int, string) {
-	var fileMutex sync.Mutex
+	fileMutex.Lock() // LOCK
+	libhttpserver.LogInfo("Acquired Lock " + *pathParam)
+	defer func() {
+		libhttpserver.LogInfo("Released Lock " + *pathParam)
+		fileMutex.Unlock()
+	}() // UNLOCK ON RETURN
 
 	if reqData.Method == "GET" {
 		if pathParam == nil {
@@ -69,7 +76,6 @@ func getHandler(reqData *libhttpserver.Request, pathParam *string, root *string)
 			return errStr, 403, makeHeaders(errStr, []string{})
 		}
 
-		fileMutex.Lock() // LOCK
 		dat, err := ioutil.ReadFile(filepath.Join(*root, *pathParam))
 		stringDat := string(dat)
 		stringDat = strings.ReplaceAll(stringDat, "\r\n", "\n")
@@ -78,7 +84,6 @@ func getHandler(reqData *libhttpserver.Request, pathParam *string, root *string)
 		typeHeader := getTypeHeader(ext)
 		getHeaders = getHeaders + libhttpserver.CRLF + typeHeader
 
-		fileMutex.Unlock() // UNLOCK
 		if err != nil {
 			errStr := fmt.Sprintf("No file exists with name '%s'", *pathParam)
 			return errStr, 404, makeHeaders(errStr, []string{})
@@ -86,9 +91,7 @@ func getHandler(reqData *libhttpserver.Request, pathParam *string, root *string)
 		libhttpserver.LogInfo("Returning requested file " + *pathParam)
 		return stringDat, 200, getHeaders
 	} else if reqData.Method == "POST" {
-		fileMutex.Lock() // LOCK
 		err := ioutil.WriteFile(filepath.Join(*root, *pathParam), []byte(*reqData.Body), 0644)
-		fileMutex.Unlock() // UNLOCK
 		if err != nil {
 			errStr := fmt.Sprintf("Failed to write to file '%s'", *pathParam)
 			return errStr, 500, makeHeaders(errStr, []string{})
