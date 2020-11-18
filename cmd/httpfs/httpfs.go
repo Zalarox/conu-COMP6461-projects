@@ -62,12 +62,6 @@ func getHandler(reqData *libhttpserver.Request, pathParam *string, root *string)
 		fileMutex.Unlock()
 	}() // UNLOCK ON RETURN
 
-	if strings.Contains(*pathParam, "/") {
-		errStr := fmt.Sprintf("Access Forbidden: '%s' is outside server root directory", *pathParam)
-		libhttpserver.LogInfo("Access Denied to request.")
-		return errStr, 403, makeHeaders(errStr, []string{})
-	}
-
 	if reqData.Method == "GET" {
 		if pathParam == nil {
 			libhttpserver.LogInfo("Responding to request for directory listing.")
@@ -75,6 +69,12 @@ func getHandler(reqData *libhttpserver.Request, pathParam *string, root *string)
 			body := strings.Join(files, ",")
 			responseHeaders := makeHeaders(body, []string{})
 			return body, 200, responseHeaders
+		}
+
+		if strings.Contains(*pathParam, "/") {
+			errStr := fmt.Sprintf("Access Forbidden: '%s' is outside server root directory", *pathParam)
+			libhttpserver.LogInfo("Access Denied to request.")
+			return errStr, 403, makeHeaders(errStr, []string{})
 		}
 
 		dat, err := ioutil.ReadFile(filepath.Join(*root, *pathParam))
@@ -92,6 +92,11 @@ func getHandler(reqData *libhttpserver.Request, pathParam *string, root *string)
 		libhttpserver.LogInfo("Returning requested file " + *pathParam)
 		return stringDat, 200, getHeaders
 	} else if reqData.Method == "POST" {
+		if strings.Contains(*pathParam, "/") {
+			errStr := fmt.Sprintf("Access Forbidden: '%s' is outside server root directory", *pathParam)
+			libhttpserver.LogInfo("Access Denied to request.")
+			return errStr, 403, makeHeaders(errStr, []string{})
+		}
 		err := ioutil.WriteFile(filepath.Join(*root, *pathParam), []byte(*reqData.Body), 0644)
 		if err != nil {
 			errStr := fmt.Sprintf("Failed to write to file '%s'", *pathParam)
