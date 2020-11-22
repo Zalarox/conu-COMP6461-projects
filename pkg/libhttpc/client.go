@@ -1,6 +1,7 @@
 package libhttpc
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -8,23 +9,120 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 )
 
-func udp_send_recv(inputUrl string, reader io.Reader) {
+//func udp_send_recv(inputUrl string, reader io.Reader) {
+//
+//	conn, err := udpConnectHandler(inputUrl)
+//	n, err := io.Copy(conn, reader)
+//	if err != nil {
+//		fmt.Println(err)
+//	}
+//	fmt.Printf("Packets written: %d", n)
+//	buffer := make([]byte, 1024)
+//	timeout := 15 * time.Second
+//	deadline := time.Now().Add(timeout)
+//	_ = conn.SetDeadline(deadline)
+//	readBytes, addr, err := conn.ReadFrom(buffer)
+//	fmt.Printf("Received %d bytes from %s", readBytes, addr)
+//}
 
-	conn, err := udpConnectHandler(inputUrl)
-	n, err := io.Copy(conn, reader)
+func ParsePacket(data []byte) UDPPacket {
+	pType := data[0]
+	seqNo := data[1:5]
+	peerAddr := data[5:9]
+	peerPort := data[9:11]
+	payload := data[11:]
+
+	fmt.Println(pType)
+	fmt.Println(seqNo)
+	fmt.Println(peerAddr)
+	fmt.Println(peerPort)
+	fmt.Println(payload)
+
+	return UDPPacket{}
+}
+
+func MakePacket(pType uint32, seqNo uint32, parsedURL *url.URL, payload string) UDPPacket {
+
+	// pType, one of the following: 0 - Data, 1- ACK, 2 - SYN, 3 - SYN-ACK, 4 - NAK; 1 byte
+	pTypeByte := []byte{byte(pType)}
+
+	// seqNo, for SYN it is the initial pNo during 3WH -- else incremental packet numbers; 4 bytes BE
+	seqNoBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(seqNoBytes, seqNo)
+
+	// peerAddr, either sender/receiver -- translated by router!; 4 bytes
+	peerAddrBytes := make([]byte, 4)
+	addrSplit := strings.Split(parsedURL.Host, ":")
+	peerAddr := addrSplit[0]
+	peerAddrSplit := strings.Split(peerAddr, ".")
+	for i, section := range peerAddrSplit {
+		intSection, _ := strconv.Atoi(section)
+		peerAddrBytes[i] = byte(intSection)
+	}
+
+	//peerAddrBytes := make([]byte, 4)
+	//binary.BigEndian.PutUint32(peerAddrBytes, peerAddr)
+
+	// peerPort, either sender/receiver -- translated by router!; 2 bytes BE
+	peerPortBytes := make([]byte, 2)
+	peerPortInt, _ := strconv.Atoi(addrSplit[1])
+	binary.BigEndian.PutUint16(peerPortBytes, uint16(peerPortInt))
+
+	// payload; max 1013 bytes
+	// TODO handle size constraints/breaking somehow...
+	payloadBytes := []byte(payload)
+
+	// Packet Size Range: 11 (no payload) to 1024 (full payload)
+
+	return UDPPacket{
+		pType:    pTypeByte,
+		seqNo:    seqNoBytes,
+		peerAddr: peerAddrBytes,
+		peerPort: peerPortBytes,
+		payload:  payloadBytes,
+	}
+}
+
+func UDPGet(inputUrl string, headers RequestHeader) (string, error) {
+	parsedURL, parsedHeaders, conn, err := udpConnectHandler(inputUrl, headers)
+
+	if err != nil {
+		return BlankString, err
+	}
+
+	defer conn.Close()
+	requestString := fmt.Sprintf(
+		"GET %s %s%s%s%s%s",
+		parsedURL.RequestURI(), ProtocolVersion, CRLF,
+		parsedHeaders, CRLF, CRLF)
+
+	packet := MakePacket(0, 1, parsedURL, requestString)
+
+	packetBytes := append(packet.pType, packet.seqNo...)
+	packetBytes = append(packetBytes, packet.peerAddr...)
+	packetBytes = append(packetBytes, packet.peerPort...)
+	packetBytes = append(packetBytes, packet.payload...)
+
+	len, err := conn.Write(packetBytes)
 	if err != nil {
 		fmt.Println(err)
 	}
-	fmt.Printf("Packets written: %d", n)
-	buffer := make([]byte, 1024)
-	timeout := 15 * time.Second
-	deadline := time.Now().Add(timeout)
-	_ = conn.SetDeadline(deadline)
-	readBytes, addr, err := conn.ReadFrom(buffer)
-	fmt.Printf("Received %d bytes from %s", readBytes, addr)
+	fmt.Println("Written out bytes ", len)
+
+	//response, err := readResponseFromConnection(conn)
+	//
+	//if err != nil {
+	//	return BlankString, nil
+	//}
+	//
+	//return string(response), nil
+	return "", nil
+}
+
+func UDPPost(inputUrl string, headers RequestHeader, body []byte) (string, error) {
+	return "", nil
 }
 
 func Get(inputUrl string, headers RequestHeader) (string, error) {
@@ -179,24 +277,21 @@ func readResponseFromConnection(conn net.Conn) ([]byte, error) {
 	return data, nil
 }
 
-func udpConnectHandler(inputUrl string) (*net.UDPConn, error) {
+func udpConnectHandler(inputUrl string, headers RequestHeader) (*url.URL, string, *net.UDPConn, error) {
 	parsedURL, urlErr := url.Parse(inputUrl)
+	parsedHeaders := stringifyHeaders(headers)
+
 	if urlErr != nil {
 		fmt.Println(urlErr)
 	}
 
-	port := parsedURL.Port()
-	if port == BlankString {
-		port = "80"
-	}
-
-	host := fmt.Sprintf("%s:%s", parsedURL.Hostname(), port)
+	host := fmt.Sprintf("%s:%s", RouterAddr, RouterPort)
 	hostUdpAddr, err := net.ResolveUDPAddr("udp", host)
 	if err != nil {
 		fmt.Println(err)
 	}
 	conn, err := net.DialUDP("udp", nil, hostUdpAddr)
-	return conn, err
+	return parsedURL, parsedHeaders, conn, err
 }
 
 func connectHandler(inputUrl string, headers RequestHeader) (*url.URL, string, net.Conn, error) {

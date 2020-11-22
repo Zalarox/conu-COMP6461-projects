@@ -9,6 +9,14 @@ type Response struct {
 	Body       string
 }
 
+type UDPPacket struct {
+	pType    []byte
+	seqNo    []byte
+	peerAddr []byte
+	peerPort []byte
+	payload  []byte
+}
+
 const ProtocolVersion = "HTTP/1.0"
 
 const CRLF = "\r\n"
@@ -58,3 +66,7 @@ const HelpTextHeader = `Associates headers to HTTP Request with the format 'key:
 const HelpTextOutput = `Writes the response of the HTTP request to a file.`
 
 const DefaultRedirectURI = "http://google.com"
+
+const RouterAddr = "127.0.0.1"
+
+const RouterPort = "3000"

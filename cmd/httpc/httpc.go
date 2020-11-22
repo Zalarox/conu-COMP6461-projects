@@ -93,7 +93,8 @@ func parseArgs() {
 				return
 			}
 
-			res, getErr := libhttpc.Get(url, headers)
+			//res, getErr := libhttpc.Get(url, headers)
+			res, getErr := libhttpc.UDPGet(url, headers)
 
 			if getErr != nil {
 				writeOutput(outputPtr, []byte(getErr.Error()))
@@ -150,7 +151,9 @@ func parseArgs() {
 				return
 			}
 
-			res, postErr := libhttpc.Post(url, headers, requestBody)
+			//res, postErr := libhttpc.Post(url, headers, requestBody)
+			res, postErr := libhttpc.UDPPost(url, headers, requestBody)
+
 			if *verbosePtr {
 				writeOutput(outputPtr, []byte(res))
 				return
