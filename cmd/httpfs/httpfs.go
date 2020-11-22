@@ -123,11 +123,12 @@ func parseArgs() {
 	flag.Parse()
 	fmt.Printf("Server listening on port: %s\nDirectory Served: %s\nVerbose Logging:%t\n\n", *portPtr, *dirPtr, *verbosePtr)
 
-	PORT := ":" + *portPtr
+	//PORT := ":" + *portPtr
 
 	libhttpserver.RegisterHandler("POST", "/", getHandler)
 	libhttpserver.RegisterHandler("GET", "/", getHandler)
-	libhttpserver.StartServer(PORT, *dirPtr, *verbosePtr)
+	//libhttpserver.StartServer(PORT, *dirPtr, *verbosePtr)
+	libhttpserver.StartUDPServer(*portPtr, *dirPtr, *verbosePtr)
 }
 
 func main() {

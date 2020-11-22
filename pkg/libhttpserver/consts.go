@@ -41,5 +41,13 @@ type Request struct {
 	Body    *string
 }
 
+type UDPPacket struct {
+	pType    []byte
+	seqNo    []byte
+	peerAddr []byte
+	peerPort []byte
+	payload  []byte
+}
+
 var routeMap = map[string]map[string]handlerFn{}
 var verboseLogging bool

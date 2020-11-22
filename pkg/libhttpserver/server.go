@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -42,6 +43,29 @@ func findRoute(parsedRequest *Request) (handlerFn, string) {
 		return routeMap[parsedRequest.Method]["/"], parsedRequest.route
 	}
 	return routeMap[parsedRequest.Method]["/"], paths[len(paths)-1]
+}
+
+func ParsePacket(data []byte) UDPPacket {
+	pType := data[0]
+	seqNo := data[1:5]
+	peerAddr := data[5:9]
+	peerPort := data[9:11]
+	payload := data[11:]
+
+	return UDPPacket{
+		pType:    []byte{pType},
+		seqNo:    seqNo,
+		peerAddr: peerAddr,
+		peerPort: peerPort,
+		payload:  payload,
+	}
+}
+
+func handleUDPConnection(reqData []byte) {
+	packet := ParsePacket(reqData)
+	//test := make([]byte, 2)
+	//binary.BigEndian.Uint16(packet.peerPort)
+	fmt.Println(string(packet.payload))
 }
 
 func handleConnection(curConn net.Conn) {
@@ -116,6 +140,41 @@ func RegisterHandler(method string, route string, handler handlerFn) {
 		routeMap[method] = map[string]handlerFn{}
 	}
 	routeMap[method][route] = handler
+}
+
+func StartUDPServer(port string, directory string, verbose bool) {
+	portInt, _ := strconv.Atoi(port)
+	serverIP, _, _ := net.ParseCIDR("127.0.0.1/8")
+	serverAddr := net.UDPAddr{
+		IP:   serverIP,
+		Port: portInt,
+	}
+	listener, err := net.ListenUDP("udp", &serverAddr)
+
+	if _, err := os.Stat(directory); os.IsNotExist(err) {
+		log.Fatal("Directory not found.")
+	}
+
+	rootDirectory = directory
+	verboseLogging = verbose
+
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	defer listener.Close()
+
+	for {
+		buffer := make([]byte, 1024)
+		n, addr, err := listener.ReadFromUDP(buffer)
+		fmt.Println("Read bytes ", n, " from ", addr)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		go handleUDPConnection(buffer)
+	}
 }
 
 func StartServer(port string, directory string, verbose bool) {
