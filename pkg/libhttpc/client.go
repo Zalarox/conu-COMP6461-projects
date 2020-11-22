@@ -8,7 +8,24 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
+
+func udp_send_recv(inputUrl string, reader io.Reader) {
+
+	conn, err := udpConnectHandler(inputUrl)
+	n, err := io.Copy(conn, reader)
+	if err != nil {
+		fmt.Println(err)
+	}
+	fmt.Printf("Packets written: %d", n)
+	buffer := make([]byte, 1024)
+	timeout := 15 * time.Second
+	deadline := time.Now().Add(timeout)
+	_ = conn.SetDeadline(deadline)
+	readBytes, addr, err := conn.ReadFrom(buffer)
+	fmt.Printf("Received %d bytes from %s", readBytes, addr)
+}
 
 func Get(inputUrl string, headers RequestHeader) (string, error) {
 	parsedURL, parsedHeaders, conn, err := connectHandler(inputUrl, headers)
@@ -160,6 +177,26 @@ func readResponseFromConnection(conn net.Conn) ([]byte, error) {
 	}
 
 	return data, nil
+}
+
+func udpConnectHandler(inputUrl string) (*net.UDPConn, error) {
+	parsedURL, urlErr := url.Parse(inputUrl)
+	if urlErr != nil {
+		fmt.Println(urlErr)
+	}
+
+	port := parsedURL.Port()
+	if port == BlankString {
+		port = "80"
+	}
+
+	host := fmt.Sprintf("%s:%s", parsedURL.Hostname(), port)
+	hostUdpAddr, err := net.ResolveUDPAddr("udp", host)
+	if err != nil {
+		fmt.Println(err)
+	}
+	conn, err := net.DialUDP("udp", nil, hostUdpAddr)
+	return conn, err
 }
 
 func connectHandler(inputUrl string, headers RequestHeader) (*url.URL, string, net.Conn, error) {
