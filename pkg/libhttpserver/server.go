@@ -1,6 +1,7 @@
 package libhttpserver
 
 import (
+	"encoding/binary"
 	"fmt"
 	"log"
 	"net"
@@ -61,11 +62,81 @@ func ParsePacket(data []byte) UDPPacket {
 	}
 }
 
-func handleUDPConnection(reqData []byte) {
+func MakePacket(pType uint32, seqNo uint32, addr string, port uint16, payload string) UDPPacket {
+
+	// pType, one of the following: 0 - Data, 1- ACK, 2 - SYN, 3 - SYN-ACK, 4 - NAK; 1 byte
+	pTypeByte := []byte{byte(pType)}
+
+	// seqNo, for SYN it is the initial pNo during 3WH -- else incremental packet numbers; 4 bytes BE
+	seqNoBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(seqNoBytes, seqNo)
+
+	// peerAddr, either sender/receiver -- translated by router!; 4 bytes
+	peerAddrBytes := make([]byte, 4)
+
+	peerAddrSplit := strings.Split(addr, ".")
+	for i, section := range peerAddrSplit {
+		intSection, _ := strconv.Atoi(section)
+		peerAddrBytes[i] = byte(intSection)
+	}
+
+	//peerAddrBytes := make([]byte, 4)
+	//binary.BigEndian.PutUint32(peerAddrBytes, peerAddr)
+
+	// peerPort, either sender/receiver -- translated by router!; 2 bytes BE
+	peerPortBytes := make([]byte, 2)
+	binary.BigEndian.PutUint16(peerPortBytes, port)
+
+	// payload; max 1013 bytes
+	// TODO handle size constraints/breaking somehow...
+	payloadBytes := []byte(payload)
+
+	// Packet Size Range: 11 (no payload) to 1024 (full payload)
+
+	return UDPPacket{
+		pType:    pTypeByte,
+		seqNo:    seqNoBytes,
+		peerAddr: peerAddrBytes,
+		peerPort: peerPortBytes,
+		payload:  payloadBytes,
+	}
+}
+
+func handleUDPConnection(reqData []byte, addr *net.UDPAddr, conn *net.UDPConn) {
 	packet := ParsePacket(reqData)
 	//test := make([]byte, 2)
 	//binary.BigEndian.Uint16(packet.peerPort)
-	fmt.Println(string(packet.payload))
+	//fmt.Println(string(packet.payload))
+
+	var response string
+	var statusCode int
+	var headers string
+
+	parsedRequest := parseRequestData(string(packet.payload))
+	handler := routeMap[parsedRequest.Method][parsedRequest.route]
+
+	if handler != nil {
+		response, statusCode, headers = handler(parsedRequest, nil, &rootDirectory)
+	} else {
+		handler, pathParam := findRoute(parsedRequest)
+		response, statusCode, headers = handler(parsedRequest, &pathParam, &rootDirectory)
+	}
+
+	httpResponse := constructStructuredResponse(response, statusCode, headers)
+	hostAddr := fmt.Sprintf("%d.%d.%d.%d",
+		packet.peerAddr[0], packet.peerAddr[1], packet.peerAddr[2], packet.peerAddr[3])
+	responsePacket := MakePacket(0, 1, hostAddr, binary.BigEndian.Uint16(packet.peerPort), httpResponse)
+
+	packetBytes := append(responsePacket.pType, responsePacket.seqNo...)
+	packetBytes = append(packetBytes, responsePacket.peerAddr...)
+	packetBytes = append(packetBytes, responsePacket.peerPort...)
+	packetBytes = append(packetBytes, responsePacket.payload...)
+
+	n, writeErr := conn.WriteToUDP(packetBytes, addr)
+	if writeErr != nil {
+		log.Fatalln(writeErr)
+	}
+	LogInfo(fmt.Sprintf("Responded to %s with status code %d, written %d", addr, statusCode, n))
 }
 
 func handleConnection(curConn net.Conn) {
@@ -149,7 +220,7 @@ func StartUDPServer(port string, directory string, verbose bool) {
 		IP:   serverIP,
 		Port: portInt,
 	}
-	listener, err := net.ListenUDP("udp", &serverAddr)
+	udpConn, err := net.ListenUDP("udp", &serverAddr)
 
 	if _, err := os.Stat(directory); os.IsNotExist(err) {
 		log.Fatal("Directory not found.")
@@ -163,17 +234,17 @@ func StartUDPServer(port string, directory string, verbose bool) {
 		return
 	}
 
-	defer listener.Close()
+	defer udpConn.Close()
 
 	for {
 		buffer := make([]byte, 1024)
-		n, addr, err := listener.ReadFromUDP(buffer)
+		n, addr, err := udpConn.ReadFromUDP(buffer)
 		fmt.Println("Read bytes ", n, " from ", addr)
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
-		go handleUDPConnection(buffer)
+		go handleUDPConnection(buffer, addr, udpConn)
 	}
 }
 

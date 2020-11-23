@@ -34,13 +34,13 @@ func ParsePacket(data []byte) UDPPacket {
 	peerPort := data[9:11]
 	payload := data[11:]
 
-	fmt.Println(pType)
-	fmt.Println(seqNo)
-	fmt.Println(peerAddr)
-	fmt.Println(peerPort)
-	fmt.Println(payload)
-
-	return UDPPacket{}
+	return UDPPacket{
+		pType:    []byte{pType},
+		seqNo:    seqNo,
+		peerAddr: peerAddr,
+		peerPort: peerPort,
+		payload:  payload,
+	}
 }
 
 func MakePacket(pType uint32, seqNo uint32, parsedURL *url.URL, payload string) UDPPacket {
@@ -105,24 +105,59 @@ func UDPGet(inputUrl string, headers RequestHeader) (string, error) {
 	packetBytes = append(packetBytes, packet.peerPort...)
 	packetBytes = append(packetBytes, packet.payload...)
 
-	len, err := conn.Write(packetBytes)
+	_, err = conn.Write(packetBytes)
 	if err != nil {
 		fmt.Println(err)
 	}
-	fmt.Println("Written out bytes ", len)
 
-	//response, err := readResponseFromConnection(conn)
-	//
-	//if err != nil {
-	//	return BlankString, nil
-	//}
-	//
-	//return string(response), nil
-	return "", nil
+	readBuf := make([]byte, 1024)
+	_, _, err = conn.ReadFromUDP(readBuf)
+
+	responsePacket := ParsePacket(readBuf)
+
+	if err != nil {
+		return BlankString, nil
+	}
+
+	return string(responsePacket.payload), nil
 }
 
 func UDPPost(inputUrl string, headers RequestHeader, body []byte) (string, error) {
-	return "", nil
+	headers["Content-Length"] = fmt.Sprintf("%d", len(body))
+	parsedURL, parsedHeaders, conn, err := udpConnectHandler(inputUrl, headers)
+
+	if err != nil {
+		return BlankString, err
+	}
+
+	defer conn.Close()
+
+	requestString := fmt.Sprintf("POST %s %s%s%s%s%s%s",
+		parsedURL.RequestURI(), ProtocolVersion, CRLF,
+		parsedHeaders, CRLF, body, CRLF)
+
+	packet := MakePacket(0, 1, parsedURL, requestString)
+
+	packetBytes := append(packet.pType, packet.seqNo...)
+	packetBytes = append(packetBytes, packet.peerAddr...)
+	packetBytes = append(packetBytes, packet.peerPort...)
+	packetBytes = append(packetBytes, packet.payload...)
+
+	_, err = conn.Write(packetBytes)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	readBuf := make([]byte, 1024)
+	_, _, err = conn.ReadFromUDP(readBuf)
+
+	responsePacket := ParsePacket(readBuf)
+
+	if err != nil {
+		return BlankString, nil
+	}
+
+	return string(responsePacket.payload), nil
 }
 
 func Get(inputUrl string, headers RequestHeader) (string, error) {
@@ -163,7 +198,6 @@ func Post(inputUrl string, headers RequestHeader, body []byte) (string, error) {
 		parsedHeaders, CRLF, body, CRLF)
 	fmt.Fprintf(conn, requestString)
 
-	fmt.Println("Here you go.")
 	fmt.Println(requestString)
 
 	response, err := readResponseFromConnection(conn)
