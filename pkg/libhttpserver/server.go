@@ -153,7 +153,7 @@ func handleUDPConnection(reqData []byte, addr *net.UDPAddr, conn *net.UDPConn) {
 				setExpectedPacketNum(lastReceivedSeqNo, &clientReceiver)
 				appendToReceiverWindow(&packet, &clientReceiver)
 				// send ACK
-				ackPacket := MakePacket(2, lastReceivedSeqNo, hostAddr, binary.BigEndian.Uint16(packet.peerPort), "")
+				ackPacket := MakePacket(1, lastReceivedSeqNo, hostAddr, binary.BigEndian.Uint16(packet.peerPort), "")
 				packetBytes := getBytesFromPacket(ackPacket)
 				_, writeErr := conn.WriteToUDP(packetBytes, addr)
 				if writeErr != nil {
