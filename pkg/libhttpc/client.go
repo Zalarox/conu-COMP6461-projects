@@ -87,27 +87,28 @@ func makePacket(pType uint32, seqNo uint32, parsedURL *url.URL, payload string) 
 }
 
 func getDataPacketBytes(seqNo uint32, parsedURL *url.URL, payload string) [][]byte {
-	numPackets := int(math.Ceil(float64((len(payload) + 11) / 1024)))
+	numPackets := int(math.Ceil(float64(len(payload)+11) / float64(1024)))
 	packetsBytes := make([][]byte, numPackets)
 	payloadBytes := []byte(payload)
 
 	if numPackets == 1 {
 		packetBytes := getBytesFromPacket(makePacket(0, seqNo, parsedURL, payload))
-		packetBytes = append(packetsBytes[0], packetBytes...)
+		packetsBytes[0] = packetBytes
 		return packetsBytes
 	}
 
 	counter := 0
 	for i := 1; i < numPackets; i++ {
-		chunk := payloadBytes[counter : counter+1014]
-		packetsBytes[i-1] = getBytesFromPacket(makePacket(0, seqNo, parsedURL, string(chunk)))
+		chunk := payloadBytes[counter : counter+1013]
+		packetForChunk := makePacket(0, seqNo, parsedURL, string(chunk))
+		packetsBytes[i-1] = getBytesFromPacket(packetForChunk)
 		counter += 1013
 		seqNo++
 	}
 	residue := (len(payload) + 11) % 1024
 	if residue > 0 {
 		residueChunk := payloadBytes[counter:]
-		packetsBytes[numPackets] = getBytesFromPacket(makePacket(0, seqNo, parsedURL, string(residueChunk)))
+		packetsBytes[numPackets-1] = getBytesFromPacket(makePacket(0, seqNo, parsedURL, string(residueChunk)))
 	}
 	return packetsBytes
 }
@@ -144,6 +145,7 @@ func getBytesFromPacket(packet UDPPacket) []byte {
 	packetBytes := append(packet.pType, packet.seqNo...)
 	packetBytes = append(packetBytes, packet.peerAddr...)
 	packetBytes = append(packetBytes, packet.peerPort...)
+	packetBytes = append(packetBytes, packet.payload...)
 	return packetBytes
 }
 

@@ -51,6 +51,13 @@ type UDPPacket struct {
 	payload  []byte
 }
 
+type Receiver struct {
+	expectedPacketNum     uint32
+	lastReceivedPacketNum uint32
+	receiverWindow        []UDPPacket
+	naks                  []uint32
+}
+
 var clients sync.Map
 var routeMap = map[string]map[string]handlerFn{}
 var verboseLogging bool

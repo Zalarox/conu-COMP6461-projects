@@ -46,7 +46,7 @@ func findRoute(parsedRequest *Request) (handlerFn, string) {
 	return routeMap[parsedRequest.Method]["/"], paths[len(paths)-1]
 }
 
-func ParsePacket(data []byte) UDPPacket {
+func parsePacket(data []byte) UDPPacket {
 	pType := data[0]
 	seqNo := data[1:5]
 	peerAddr := data[5:9]
@@ -60,6 +60,13 @@ func ParsePacket(data []byte) UDPPacket {
 		peerPort: peerPort,
 		payload:  payload,
 	}
+}
+
+func getBytesFromPacket(packet UDPPacket) []byte {
+	packetBytes := append(packet.pType, packet.seqNo...)
+	packetBytes = append(packetBytes, packet.peerAddr...)
+	packetBytes = append(packetBytes, packet.peerPort...)
+	return packetBytes
 }
 
 func MakePacket(pType uint32, seqNo uint32, addr string, port uint16, payload string) UDPPacket {
@@ -80,9 +87,6 @@ func MakePacket(pType uint32, seqNo uint32, addr string, port uint16, payload st
 		peerAddrBytes[i] = byte(intSection)
 	}
 
-	//peerAddrBytes := make([]byte, 4)
-	//binary.BigEndian.PutUint32(peerAddrBytes, peerAddr)
-
 	// peerPort, either sender/receiver -- translated by router!; 2 bytes BE
 	peerPortBytes := make([]byte, 2)
 	binary.BigEndian.PutUint16(peerPortBytes, port)
@@ -92,7 +96,6 @@ func MakePacket(pType uint32, seqNo uint32, addr string, port uint16, payload st
 	payloadBytes := []byte(payload)
 
 	// Packet Size Range: 11 (no payload) to 1024 (full payload)
-
 	return UDPPacket{
 		pType:    pTypeByte,
 		seqNo:    seqNoBytes,
@@ -102,19 +105,23 @@ func MakePacket(pType uint32, seqNo uint32, addr string, port uint16, payload st
 	}
 }
 
+func inNaks(seqNo uint32, receiver *Receiver) bool {
+	for _, nakSeq := range receiver.naks {
+		if nakSeq == seqNo {
+			return true
+		}
+	}
+	return false
+}
+
 func handleUDPConnection(reqData []byte, addr *net.UDPAddr, conn *net.UDPConn) {
-	packet := ParsePacket(reqData)
-	//test := make([]byte, 2)
-	//binary.BigEndian.Uint16(packet.peerPort)
-	//fmt.Println(string(packet.payload))
+	packet := parsePacket(reqData)
 	hostAddr := getAddressFromBytes(packet)
 	if packet.pType[0] == 2 {
 		// SYN
 		receivedSeq := binary.BigEndian.Uint32(packet.seqNo)
 		synAck := MakePacket(3, receivedSeq+1, hostAddr, binary.BigEndian.Uint16(packet.peerPort), "")
-		packetBytes := append(synAck.pType, synAck.seqNo...)
-		packetBytes = append(packetBytes, synAck.peerAddr...)
-		packetBytes = append(packetBytes, synAck.peerPort...)
+		packetBytes := getBytesFromPacket(synAck)
 		_, writeErr := conn.WriteToUDP(packetBytes, addr)
 		if writeErr != nil {
 			log.Fatalln(writeErr)
@@ -127,35 +134,107 @@ func handleUDPConnection(reqData []byte, addr *net.UDPAddr, conn *net.UDPConn) {
 		LogInfo(fmt.Sprintf("Received ACK: %d", receivedSeq))
 		// modify the window
 		return
-	}
-
-	var response string
-	var statusCode int
-	var headers string
-
-	parsedRequest := parseRequestData(string(packet.payload))
-	handler := routeMap[parsedRequest.Method][parsedRequest.route]
-
-	if handler != nil {
-		response, statusCode, headers = handler(parsedRequest, nil, &rootDirectory)
 	} else {
-		handler, pathParam := findRoute(parsedRequest)
-		response, statusCode, headers = handler(parsedRequest, &pathParam, &rootDirectory)
+		// put into receiver window for client_id
+		clientId := fmt.Sprintf("%s:%d", hostAddr, binary.BigEndian.Uint16(packet.peerPort))
+		clientReceiverInterface, _ := clients.Load(clientId)
+		lastReceivedSeqNo := binary.BigEndian.Uint32(packet.seqNo)
+		if clientReceiverInterface == nil {
+			clients.Store(clientId, Receiver{
+				lastReceivedPacketNum: lastReceivedSeqNo,
+				expectedPacketNum:     lastReceivedSeqNo + 1,
+				receiverWindow:        []UDPPacket{},
+			})
+		} else {
+			clientReceiver := clientReceiverInterface.(Receiver)
+			if clientReceiver.expectedPacketNum == lastReceivedSeqNo {
+				// happy path
+				setLastReceivedPacketNum(lastReceivedSeqNo, &clientReceiver)
+				setExpectedPacketNum(lastReceivedSeqNo, &clientReceiver)
+				appendToReceiverWindow(&packet, &clientReceiver)
+				// send ACK
+				ackPacket := MakePacket(2, lastReceivedSeqNo, hostAddr, binary.BigEndian.Uint16(packet.peerPort), "")
+				packetBytes := getBytesFromPacket(ackPacket)
+				_, writeErr := conn.WriteToUDP(packetBytes, addr)
+				if writeErr != nil {
+					log.Fatalln(writeErr)
+				}
+			} else {
+				// either a retransmitted packet from client
+				if lastReceivedSeqNo < clientReceiver.expectedPacketNum && inNaks(lastReceivedSeqNo, &clientReceiver) {
+					setExpectedPacketNum(clientReceiver.lastReceivedPacketNum+1, &clientReceiver)
+					appendToReceiverWindow(&packet, &clientReceiver)
+					removeFromNaks(lastReceivedSeqNo, &clientReceiver)
+				} else if lastReceivedSeqNo > clientReceiver.expectedPacketNum {
+					// or a packet which is much ahead of the expected seq. no.
+					for i := clientReceiver.expectedPacketNum; i < lastReceivedSeqNo; i++ {
+						// put in NAKs
+						addToNaks(i, &clientReceiver)
+						// make NAK pack and send client
+						nakPacket := MakePacket(4, i, hostAddr, binary.BigEndian.Uint16(packet.peerPort), "")
+						packetBytes := getBytesFromPacket(nakPacket)
+						_, writeErr := conn.WriteToUDP(packetBytes, addr)
+						if writeErr != nil {
+							log.Fatalln(writeErr)
+						}
+					}
+				}
+			}
+		}
 	}
 
-	httpResponse := constructStructuredResponse(response, statusCode, headers)
-	responsePacket := MakePacket(0, 1, hostAddr, binary.BigEndian.Uint16(packet.peerPort), httpResponse)
+	//var response string
+	//var statusCode int
+	//var headers string
+	//
+	//parsedRequest := parseRequestData(string(packet.payload))
+	//handler := routeMap[parsedRequest.Method][parsedRequest.route]
+	//
+	//if handler != nil {
+	//	response, statusCode, headers = handler(parsedRequest, nil, &rootDirectory)
+	//} else {
+	//	handler, pathParam := findRoute(parsedRequest)
+	//	response, statusCode, headers = handler(parsedRequest, &pathParam, &rootDirectory)
+	//}
+	//
+	//httpResponse := constructStructuredResponse(response, statusCode, headers)
+	//responsePacket := MakePacket(0, 1, hostAddr, binary.BigEndian.Uint16(packet.peerPort), httpResponse)
+	//
+	//packetBytes := getBytesFromPacket(responsePacket)
+	//
+	//n, writeErr := conn.WriteToUDP(packetBytes, addr)
+	//if writeErr != nil {
+	//	log.Fatalln(writeErr)
+	//}
+	//LogInfo(fmt.Sprintf("Responded to %s with status code %d, written %d", addr, statusCode, n))
+}
 
-	packetBytes := append(responsePacket.pType, responsePacket.seqNo...)
-	packetBytes = append(packetBytes, responsePacket.peerAddr...)
-	packetBytes = append(packetBytes, responsePacket.peerPort...)
-	packetBytes = append(packetBytes, responsePacket.payload...)
+func addToNaks(nakSeq uint32, clientReceiver *Receiver) {
+	clientReceiver.naks = append(clientReceiver.naks, nakSeq)
+}
 
-	n, writeErr := conn.WriteToUDP(packetBytes, addr)
-	if writeErr != nil {
-		log.Fatalln(writeErr)
+func removeFromNaks(nakToRemove uint32, clientReceiver *Receiver) {
+	naks := clientReceiver.naks
+	for i, nakSeq := range naks {
+		if nakToRemove == nakSeq {
+			naks[len(naks)-1], naks[i] = naks[i], naks[len(naks)-1]
+			naks = naks[:len(naks)-1]
+			break
+		}
 	}
-	LogInfo(fmt.Sprintf("Responded to %s with status code %d, written %d", addr, statusCode, n))
+}
+
+func setLastReceivedPacketNum(seqNo uint32, clientReceiver *Receiver) {
+	clientReceiver.lastReceivedPacketNum = seqNo
+}
+
+func setExpectedPacketNum(seqNo uint32, clientReceiver *Receiver) {
+	clientReceiver.expectedPacketNum = seqNo + 1
+}
+
+func appendToReceiverWindow(receivedPacket *UDPPacket, clientReceiver *Receiver) {
+	clientReceiver.receiverWindow = append(clientReceiver.receiverWindow, *receivedPacket)
+	// throw in additional logic to handle window overflow
 }
 
 func getAddressFromBytes(packet UDPPacket) string {
@@ -262,9 +341,7 @@ func StartUDPServer(port string, directory string, verbose bool) {
 
 	for {
 		buffer := make([]byte, 1024)
-		n, addr, err := udpConn.ReadFromUDP(buffer)
-		clients.Store(addr.String(), buffer)
-		fmt.Println("Read bytes ", n, " from ", addr)
+		_, addr, err := udpConn.ReadFromUDP(buffer)
 		if err != nil {
 			fmt.Println(err)
 			return
