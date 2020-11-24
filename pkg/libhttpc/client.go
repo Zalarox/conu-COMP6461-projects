@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/url"
 	"strconv"
@@ -43,7 +44,7 @@ func ParsePacket(data []byte) UDPPacket {
 	}
 }
 
-func MakePacket(pType uint32, seqNo uint32, parsedURL *url.URL, payload string) UDPPacket {
+func makePacket(pType uint32, seqNo uint32, parsedURL *url.URL, payload string) UDPPacket {
 
 	// pType, one of the following: 0 - Data, 1- ACK, 2 - SYN, 3 - SYN-ACK, 4 - NAK; 1 byte
 	pTypeByte := []byte{byte(pType)}
@@ -85,6 +86,67 @@ func MakePacket(pType uint32, seqNo uint32, parsedURL *url.URL, payload string) 
 	}
 }
 
+func getDataPacketBytes(seqNo uint32, parsedURL *url.URL, payload string) [][]byte {
+	numPackets := int(math.Ceil(float64((len(payload) + 11) / 1024)))
+	packetsBytes := make([][]byte, numPackets)
+	payloadBytes := []byte(payload)
+
+	if numPackets == 1 {
+		packetBytes := getBytesFromPacket(makePacket(0, seqNo, parsedURL, payload))
+		packetBytes = append(packetsBytes[0], packetBytes...)
+		return packetsBytes
+	}
+
+	counter := 0
+	for i := 1; i < numPackets; i++ {
+		chunk := payloadBytes[counter : counter+1014]
+		packetsBytes[i-1] = getBytesFromPacket(makePacket(0, seqNo, parsedURL, string(chunk)))
+		counter += 1013
+		seqNo++
+	}
+	residue := (len(payload) + 11) % 1024
+	if residue > 0 {
+		residueChunk := payloadBytes[counter:]
+		packetsBytes[numPackets] = getBytesFromPacket(makePacket(0, seqNo, parsedURL, string(residueChunk)))
+	}
+	return packetsBytes
+}
+
+func handshake(conn *net.UDPConn, parsedURL *url.URL) {
+	seqInit := uint32(1)
+	packet := makePacket(2, seqInit, parsedURL, "")
+	packetBytes := getBytesFromPacket(packet)
+
+	_, err := conn.Write(packetBytes)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	readBuf := make([]byte, 11)
+	_, _, err = conn.ReadFromUDP(readBuf)
+
+	synAck := ParsePacket(readBuf)
+	receivedSeq := binary.BigEndian.Uint32(synAck.seqNo)
+	if synAck.pType[0] == 3 && receivedSeq == seqInit+1 {
+		packet = makePacket(1, receivedSeq+1, parsedURL, "")
+		packetBytes = getBytesFromPacket(packet)
+
+		_, err := conn.Write(packetBytes)
+		if err != nil {
+			fmt.Println(err)
+		}
+	} else {
+		fmt.Println("Invalid packet type or sequence number, ignoring.")
+	}
+}
+
+func getBytesFromPacket(packet UDPPacket) []byte {
+	packetBytes := append(packet.pType, packet.seqNo...)
+	packetBytes = append(packetBytes, packet.peerAddr...)
+	packetBytes = append(packetBytes, packet.peerPort...)
+	return packetBytes
+}
+
 func UDPGet(inputUrl string, headers RequestHeader) (string, error) {
 	parsedURL, parsedHeaders, conn, err := udpConnectHandler(inputUrl, headers)
 
@@ -98,16 +160,13 @@ func UDPGet(inputUrl string, headers RequestHeader) (string, error) {
 		parsedURL.RequestURI(), ProtocolVersion, CRLF,
 		parsedHeaders, CRLF, CRLF)
 
-	packet := MakePacket(0, 1, parsedURL, requestString)
+	packets := getDataPacketBytes(4, parsedURL, requestString)
 
-	packetBytes := append(packet.pType, packet.seqNo...)
-	packetBytes = append(packetBytes, packet.peerAddr...)
-	packetBytes = append(packetBytes, packet.peerPort...)
-	packetBytes = append(packetBytes, packet.payload...)
-
-	_, err = conn.Write(packetBytes)
-	if err != nil {
-		fmt.Println(err)
+	for _, packetBytes := range packets {
+		_, err = conn.Write(packetBytes)
+		if err != nil {
+			fmt.Println(err)
+		}
 	}
 
 	readBuf := make([]byte, 1024)
@@ -136,16 +195,13 @@ func UDPPost(inputUrl string, headers RequestHeader, body []byte) (string, error
 		parsedURL.RequestURI(), ProtocolVersion, CRLF,
 		parsedHeaders, CRLF, body, CRLF)
 
-	packet := MakePacket(0, 1, parsedURL, requestString)
+	packets := getDataPacketBytes(4, parsedURL, requestString)
 
-	packetBytes := append(packet.pType, packet.seqNo...)
-	packetBytes = append(packetBytes, packet.peerAddr...)
-	packetBytes = append(packetBytes, packet.peerPort...)
-	packetBytes = append(packetBytes, packet.payload...)
-
-	_, err = conn.Write(packetBytes)
-	if err != nil {
-		fmt.Println(err)
+	for _, packetBytes := range packets {
+		_, err = conn.Write(packetBytes)
+		if err != nil {
+			fmt.Println(err)
+		}
 	}
 
 	readBuf := make([]byte, 1024)
@@ -325,6 +381,7 @@ func udpConnectHandler(inputUrl string, headers RequestHeader) (*url.URL, string
 		fmt.Println(err)
 	}
 	conn, err := net.DialUDP("udp", nil, hostUdpAddr)
+	handshake(conn, parsedURL)
 	return parsedURL, parsedHeaders, conn, err
 }
 

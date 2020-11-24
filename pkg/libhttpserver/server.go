@@ -107,6 +107,27 @@ func handleUDPConnection(reqData []byte, addr *net.UDPAddr, conn *net.UDPConn) {
 	//test := make([]byte, 2)
 	//binary.BigEndian.Uint16(packet.peerPort)
 	//fmt.Println(string(packet.payload))
+	hostAddr := getAddressFromBytes(packet)
+	if packet.pType[0] == 2 {
+		// SYN
+		receivedSeq := binary.BigEndian.Uint32(packet.seqNo)
+		synAck := MakePacket(3, receivedSeq+1, hostAddr, binary.BigEndian.Uint16(packet.peerPort), "")
+		packetBytes := append(synAck.pType, synAck.seqNo...)
+		packetBytes = append(packetBytes, synAck.peerAddr...)
+		packetBytes = append(packetBytes, synAck.peerPort...)
+		_, writeErr := conn.WriteToUDP(packetBytes, addr)
+		if writeErr != nil {
+			log.Fatalln(writeErr)
+		}
+		LogInfo(fmt.Sprintf("Got SYN packet: %d", receivedSeq))
+		return
+	} else if packet.pType[0] == 1 {
+		// ACK
+		receivedSeq := binary.BigEndian.Uint32(packet.seqNo)
+		LogInfo(fmt.Sprintf("Received ACK: %d", receivedSeq))
+		// modify the window
+		return
+	}
 
 	var response string
 	var statusCode int
@@ -123,8 +144,6 @@ func handleUDPConnection(reqData []byte, addr *net.UDPAddr, conn *net.UDPConn) {
 	}
 
 	httpResponse := constructStructuredResponse(response, statusCode, headers)
-	hostAddr := fmt.Sprintf("%d.%d.%d.%d",
-		packet.peerAddr[0], packet.peerAddr[1], packet.peerAddr[2], packet.peerAddr[3])
 	responsePacket := MakePacket(0, 1, hostAddr, binary.BigEndian.Uint16(packet.peerPort), httpResponse)
 
 	packetBytes := append(responsePacket.pType, responsePacket.seqNo...)
@@ -137,6 +156,11 @@ func handleUDPConnection(reqData []byte, addr *net.UDPAddr, conn *net.UDPConn) {
 		log.Fatalln(writeErr)
 	}
 	LogInfo(fmt.Sprintf("Responded to %s with status code %d, written %d", addr, statusCode, n))
+}
+
+func getAddressFromBytes(packet UDPPacket) string {
+	return fmt.Sprintf("%d.%d.%d.%d",
+		packet.peerAddr[0], packet.peerAddr[1], packet.peerAddr[2], packet.peerAddr[3])
 }
 
 func handleConnection(curConn net.Conn) {
@@ -239,6 +263,7 @@ func StartUDPServer(port string, directory string, verbose bool) {
 	for {
 		buffer := make([]byte, 1024)
 		n, addr, err := udpConn.ReadFromUDP(buffer)
+		clients.Store(addr.String(), buffer)
 		fmt.Println("Read bytes ", n, " from ", addr)
 		if err != nil {
 			fmt.Println(err)
