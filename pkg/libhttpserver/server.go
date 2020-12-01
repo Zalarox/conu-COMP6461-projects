@@ -8,6 +8,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 func readRequestFromConnection(conn net.Conn) ([]byte, error) {
@@ -105,8 +107,8 @@ func MakePacket(pType uint32, seqNo uint32, addr string, port uint16, payload st
 	}
 }
 
-func inNaks(seqNo uint32, receiver *Receiver) bool {
-	for _, nakSeq := range receiver.naks {
+func inNaks(seqNo uint32, naks []uint32) bool {
+	for _, nakSeq := range naks {
 		if nakSeq == seqNo {
 			return true
 		}
@@ -114,127 +116,13 @@ func inNaks(seqNo uint32, receiver *Receiver) bool {
 	return false
 }
 
-func handleUDPConnection(reqData []byte, addr *net.UDPAddr, conn *net.UDPConn) {
-	packet := parsePacket(reqData)
-	hostAddr := getAddressFromBytes(packet)
-	if packet.pType[0] == 2 {
-		// SYN
-		receivedSeq := binary.BigEndian.Uint32(packet.seqNo)
-		synAck := MakePacket(3, receivedSeq+1, hostAddr, binary.BigEndian.Uint16(packet.peerPort), "")
-		packetBytes := getBytesFromPacket(synAck)
-		_, writeErr := conn.WriteToUDP(packetBytes, addr)
-		if writeErr != nil {
-			log.Fatalln(writeErr)
-		}
-		LogInfo(fmt.Sprintf("Got SYN packet: %d", receivedSeq))
-		return
-	} else if packet.pType[0] == 1 {
-		// ACK
-		receivedSeq := binary.BigEndian.Uint32(packet.seqNo)
-		LogInfo(fmt.Sprintf("Received ACK: %d", receivedSeq))
-		// modify the window
-		return
-	} else {
-		// put into receiver window for client_id
-		clientId := fmt.Sprintf("%s:%d", hostAddr, binary.BigEndian.Uint16(packet.peerPort))
-		clientReceiverInterface, _ := clients.Load(clientId)
-		lastReceivedSeqNo := binary.BigEndian.Uint32(packet.seqNo)
-		if clientReceiverInterface == nil {
-			clients.Store(clientId, Receiver{
-				lastReceivedPacketNum: lastReceivedSeqNo,
-				expectedPacketNum:     lastReceivedSeqNo + 1,
-				receiverWindow:        []UDPPacket{},
-			})
-		} else {
-			clientReceiver := clientReceiverInterface.(Receiver)
-			if clientReceiver.expectedPacketNum == lastReceivedSeqNo {
-				// happy path
-				setLastReceivedPacketNum(lastReceivedSeqNo, &clientReceiver)
-				setExpectedPacketNum(lastReceivedSeqNo, &clientReceiver)
-				appendToReceiverWindow(&packet, &clientReceiver)
-				// send ACK
-				ackPacket := MakePacket(1, lastReceivedSeqNo, hostAddr, binary.BigEndian.Uint16(packet.peerPort), "")
-				packetBytes := getBytesFromPacket(ackPacket)
-				_, writeErr := conn.WriteToUDP(packetBytes, addr)
-				if writeErr != nil {
-					log.Fatalln(writeErr)
-				}
-			} else {
-				// either a retransmitted packet from client
-				if lastReceivedSeqNo < clientReceiver.expectedPacketNum && inNaks(lastReceivedSeqNo, &clientReceiver) {
-					setExpectedPacketNum(clientReceiver.lastReceivedPacketNum+1, &clientReceiver)
-					appendToReceiverWindow(&packet, &clientReceiver)
-					removeFromNaks(lastReceivedSeqNo, &clientReceiver)
-				} else if lastReceivedSeqNo > clientReceiver.expectedPacketNum {
-					// or a packet which is much ahead of the expected seq. no.
-					for i := clientReceiver.expectedPacketNum; i < lastReceivedSeqNo; i++ {
-						// put in NAKs
-						addToNaks(i, &clientReceiver)
-						// make NAK pack and send client
-						nakPacket := MakePacket(4, i, hostAddr, binary.BigEndian.Uint16(packet.peerPort), "")
-						packetBytes := getBytesFromPacket(nakPacket)
-						_, writeErr := conn.WriteToUDP(packetBytes, addr)
-						if writeErr != nil {
-							log.Fatalln(writeErr)
-						}
-					}
-				}
-			}
+func inAcks(seqNo uint32, acks []uint32) bool {
+	for _, ackSeq := range acks {
+		if ackSeq == seqNo {
+			return true
 		}
 	}
-
-	//var response string
-	//var statusCode int
-	//var headers string
-	//
-	//parsedRequest := parseRequestData(string(packet.payload))
-	//handler := routeMap[parsedRequest.Method][parsedRequest.route]
-	//
-	//if handler != nil {
-	//	response, statusCode, headers = handler(parsedRequest, nil, &rootDirectory)
-	//} else {
-	//	handler, pathParam := findRoute(parsedRequest)
-	//	response, statusCode, headers = handler(parsedRequest, &pathParam, &rootDirectory)
-	//}
-	//
-	//httpResponse := constructStructuredResponse(response, statusCode, headers)
-	//responsePacket := MakePacket(0, 1, hostAddr, binary.BigEndian.Uint16(packet.peerPort), httpResponse)
-	//
-	//packetBytes := getBytesFromPacket(responsePacket)
-	//
-	//n, writeErr := conn.WriteToUDP(packetBytes, addr)
-	//if writeErr != nil {
-	//	log.Fatalln(writeErr)
-	//}
-	//LogInfo(fmt.Sprintf("Responded to %s with status code %d, written %d", addr, statusCode, n))
-}
-
-func addToNaks(nakSeq uint32, clientReceiver *Receiver) {
-	clientReceiver.naks = append(clientReceiver.naks, nakSeq)
-}
-
-func removeFromNaks(nakToRemove uint32, clientReceiver *Receiver) {
-	naks := clientReceiver.naks
-	for i, nakSeq := range naks {
-		if nakToRemove == nakSeq {
-			naks[len(naks)-1], naks[i] = naks[i], naks[len(naks)-1]
-			naks = naks[:len(naks)-1]
-			break
-		}
-	}
-}
-
-func setLastReceivedPacketNum(seqNo uint32, clientReceiver *Receiver) {
-	clientReceiver.lastReceivedPacketNum = seqNo
-}
-
-func setExpectedPacketNum(seqNo uint32, clientReceiver *Receiver) {
-	clientReceiver.expectedPacketNum = seqNo + 1
-}
-
-func appendToReceiverWindow(receivedPacket *UDPPacket, clientReceiver *Receiver) {
-	clientReceiver.receiverWindow = append(clientReceiver.receiverWindow, *receivedPacket)
-	// throw in additional logic to handle window overflow
+	return false
 }
 
 func getAddressFromBytes(packet UDPPacket) string {
@@ -338,15 +226,117 @@ func StartUDPServer(port string, directory string, verbose bool) {
 	}
 
 	defer udpConn.Close()
-
+	clients := sync.Map{}
 	for {
 		buffer := make([]byte, 1024)
-		_, addr, err := udpConn.ReadFromUDP(buffer)
+		n, addr, err := udpConn.ReadFromUDP(buffer)
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
-		go handleUDPConnection(buffer, addr, udpConn)
+
+		packet := parsePacket(buffer[:n])
+		hostAddr := getAddressFromBytes(packet)
+		clientPackets, loaded := clients.LoadOrStore(hostAddr, make(chan UDPPacket))
+
+		if !loaded {
+			go func() {
+				// add a timer that resets everytime a packet comes in
+				// but times out when it crosses a threshold
+				var expectedSeqNo uint32
+				expectedSeqNo = 4
+				acks := make([]uint32, 5)
+				naks := make([]uint32, 5)
+				httpPayload := make([]string, 1024)
+
+				timeout := 5 * time.Second
+				deadline := time.Now().Add(timeout)
+				for time.Now().Before(deadline) {
+					for packet := range clientPackets.(chan UDPPacket) {
+						receivedSeqNo := binary.BigEndian.Uint32(packet.seqNo)
+						if packet.pType[0] == 0 {
+							if inAcks(receivedSeqNo, acks) {
+								continue
+							}
+							if receivedSeqNo == expectedSeqNo {
+								acks = append(acks, receivedSeqNo)
+								// SEND ACK
+								ackPacket := MakePacket(1, receivedSeqNo, hostAddr, binary.BigEndian.Uint16(packet.peerPort), "")
+								packetBytes := getBytesFromPacket(ackPacket)
+								_, writeErr := udpConn.WriteToUDP(packetBytes, addr)
+								if writeErr != nil {
+									log.Fatalln(writeErr)
+								}
+								// STORE payload in proper structure
+								httpPayload[int(receivedSeqNo)] = string(packet.payload)
+								LogInfo(fmt.Sprintf("ACK'd packet %d", receivedSeqNo))
+								expectedSeqNo += 1
+							} else if receivedSeqNo < expectedSeqNo {
+								// retransmitted packet from client
+								// SEND ACK
+								ackPacket := MakePacket(1, receivedSeqNo, hostAddr, binary.BigEndian.Uint16(packet.peerPort), "")
+								packetBytes := getBytesFromPacket(ackPacket)
+								_, writeErr := udpConn.WriteToUDP(packetBytes, addr)
+								if writeErr != nil {
+									log.Fatalln(writeErr)
+								}
+								LogInfo(fmt.Sprintf("ACK'd packet %d", receivedSeqNo))
+								// CHECK IF IN naks
+								if inNaks(receivedSeqNo, naks) {
+									// STORE payload in proper structure
+									httpPayload[int(receivedSeqNo)] = string(packet.payload)
+								}
+								// else DISCARD PACKET
+							} else {
+								// SEND ACK
+								ackPacket := MakePacket(1, receivedSeqNo, hostAddr, binary.BigEndian.Uint16(packet.peerPort), "")
+								packetBytes := getBytesFromPacket(ackPacket)
+								_, writeErr := udpConn.WriteToUDP(packetBytes, addr)
+								if writeErr != nil {
+									log.Fatalln(writeErr)
+								}
+								LogInfo(fmt.Sprintf("ACK'd packet %d", receivedSeqNo))
+								for packetNum := expectedSeqNo; packetNum < receivedSeqNo; packetNum++ {
+									naks = append(naks, packetNum)
+									nakPacket := MakePacket(4, packetNum, hostAddr, binary.BigEndian.Uint16(packet.peerPort), "")
+									packetBytes := getBytesFromPacket(nakPacket)
+									_, writeErr := udpConn.WriteToUDP(packetBytes, addr)
+									if writeErr != nil {
+										log.Fatalln(writeErr)
+									}
+									LogInfo(fmt.Sprintf("NAK'd packet %d", packetNum))
+								}
+								expectedSeqNo = receivedSeqNo + 1
+							}
+						}
+						handleHandshakePacket(packet, addr, udpConn)
+					}
+				}
+			}()
+		}
+
+		clientPackets.(chan UDPPacket) <- packet
+	}
+}
+
+func handleHandshakePacket(packet UDPPacket, addr *net.UDPAddr, conn *net.UDPConn) {
+	hostAddr := getAddressFromBytes(packet)
+	if packet.pType[0] == 2 {
+		// SYN
+		receivedSeq := binary.BigEndian.Uint32(packet.seqNo)
+		synAck := MakePacket(3, receivedSeq+1, hostAddr, binary.BigEndian.Uint16(packet.peerPort), "")
+		packetBytes := getBytesFromPacket(synAck)
+		_, writeErr := conn.WriteToUDP(packetBytes, addr)
+		if writeErr != nil {
+			log.Fatalln(writeErr)
+		}
+		LogInfo(fmt.Sprintf("Got SYN packet: %d", receivedSeq))
+		return
+	} else if packet.pType[0] == 1 {
+		// ACK
+		receivedSeq := binary.BigEndian.Uint32(packet.seqNo)
+		LogInfo(fmt.Sprintf("Received ACK: %d", receivedSeq))
+		return
 	}
 }
 

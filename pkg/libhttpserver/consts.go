@@ -1,7 +1,5 @@
 package libhttpserver
 
-import "sync"
-
 const CRLF = "\r\n"
 
 const HelpTextVerbose = `Prints debugging messages.`
@@ -58,6 +56,5 @@ type Receiver struct {
 	naks                  []uint32
 }
 
-var clients sync.Map
 var routeMap = map[string]map[string]handlerFn{}
 var verboseLogging bool
