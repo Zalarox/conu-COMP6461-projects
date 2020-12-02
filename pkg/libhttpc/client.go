@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 //func udp_send_recv(inputUrl string, reader io.Reader) {
@@ -114,30 +115,45 @@ func getDataPacketBytes(seqNo uint32, parsedURL *url.URL, payload string) [][]by
 }
 
 func handshake(conn *net.UDPConn, parsedURL *url.URL) {
-	seqInit := uint32(1)
-	packet := makePacket(2, seqInit, parsedURL, "")
-	packetBytes := getBytesFromPacket(packet)
+	for {
+		deadline := time.Now().Add(15 * time.Second)
+		//wTimeoutErr := conn.SetWriteDeadline(deadline)
+		rTimeoutErr := conn.SetReadDeadline(deadline)
+		//if wTimeoutErr != nil || rTimeoutErr != nil {
+		if rTimeoutErr != nil {
+			fmt.Println("Timing out!")
+		}
 
-	_, err := conn.Write(packetBytes)
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	readBuf := make([]byte, 11)
-	_, _, err = conn.ReadFromUDP(readBuf)
-
-	synAck := ParsePacket(readBuf)
-	receivedSeq := binary.BigEndian.Uint32(synAck.seqNo)
-	if synAck.pType[0] == 3 && receivedSeq == seqInit+1 {
-		packet = makePacket(1, receivedSeq+1, parsedURL, "")
-		packetBytes = getBytesFromPacket(packet)
+		seqInit := uint32(1)
+		packet := makePacket(2, seqInit, parsedURL, "")
+		packetBytes := getBytesFromPacket(packet)
 
 		_, err := conn.Write(packetBytes)
 		if err != nil {
 			fmt.Println(err)
 		}
-	} else {
-		fmt.Println("Invalid packet type or sequence number, ignoring.")
+
+		readBuf := make([]byte, 11)
+		_, _, readErr := conn.ReadFromUDP(readBuf)
+		if readErr != nil {
+			fmt.Println("I/O timeout, retransmissing...")
+			continue
+		}
+
+		synAck := ParsePacket(readBuf)
+		receivedSeq := binary.BigEndian.Uint32(synAck.seqNo)
+		if synAck.pType[0] == 3 && receivedSeq == seqInit+1 {
+			packet = makePacket(1, receivedSeq+1, parsedURL, "")
+			packetBytes = getBytesFromPacket(packet)
+
+			_, err := conn.Write(packetBytes)
+			if err != nil {
+				fmt.Println(err)
+			}
+			break
+		} else {
+			fmt.Println("Invalid packet type or sequence number, ignoring.")
+		}
 	}
 }
 
@@ -199,20 +215,48 @@ func UDPPost(inputUrl string, headers RequestHeader, body []byte) (string, error
 
 	packets := getDataPacketBytes(4, parsedURL, requestString)
 
+	// start a goroutine listener for the ACKs/NAKs
+	packetChan := make(chan UDPPacket)
+
+	go func() {
+		for packet := range packetChan {
+			if packet.pType[0] == 4 {
+				fmt.Println("Handling NAK")
+				missingNo := binary.BigEndian.Uint32(packet.seqNo)
+				missingPacket := packets[int(missingNo)-1]
+				_, err = conn.Write(missingPacket)
+				if err != nil {
+					fmt.Println(err)
+				}
+			}
+		}
+	}()
+
 	for _, packetBytes := range packets {
 		_, err = conn.Write(packetBytes)
 		if err != nil {
 			fmt.Println(err)
 		}
 	}
+	var responsePacket UDPPacket
 
-	readBuf := make([]byte, 1024)
-	_, _, err = conn.ReadFromUDP(readBuf)
+	for {
+		readBuf := make([]byte, 1024)
+		_, _, err = conn.ReadFromUDP(readBuf)
+		responsePacket = ParsePacket(readBuf)
 
-	responsePacket := ParsePacket(readBuf)
+		if err != nil {
+			return BlankString, nil
+		}
 
-	if err != nil {
-		return BlankString, nil
+		if responsePacket.pType[0] == 1 || responsePacket.pType[0] == 4 {
+			packetChan <- responsePacket
+		}
+
+		if responsePacket.pType[0] == 0 {
+			// break out and return the payload...
+			break
+		}
 	}
 
 	return string(responsePacket.payload), nil
