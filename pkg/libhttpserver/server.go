@@ -341,18 +341,10 @@ func StartUDPServer(port string, directory string, verbose bool) {
 						}
 						// check if we are done reading the payload
 						if totalNumPackets == 1 && len(httpPayload[4]) > 0 {
+							// single packet request payload
 							responseBytes := getResponsePacketBytes(httpPayload, totalNumPackets, hostAddr, packet)
-							udpWrite(udpConn, responseBytes, addr, clients, clientKey)
-							for i := 0; i < 15; i++ {
-								stop := udpWrite(udpConn, responseBytes, addr, clients, clientKey)
-								if stop {
-									return
-								}
-								time.Sleep(time.Second)
-							}
-						} else {
-							if checkNotEmpty(httpPayload[4:(4 + totalNumPackets)]) {
-								responseBytes := getResponsePacketBytes(httpPayload, totalNumPackets, hostAddr, packet)
+							if len(responseBytes) < 1024 {
+								// single packet response payload
 								udpWrite(udpConn, responseBytes, addr, clients, clientKey)
 								for i := 0; i < 15; i++ {
 									stop := udpWrite(udpConn, responseBytes, addr, clients, clientKey)
@@ -360,6 +352,27 @@ func StartUDPServer(port string, directory string, verbose bool) {
 										return
 									}
 									time.Sleep(time.Second)
+								}
+							} else {
+								// multi packet response payload
+							}
+
+						} else {
+							// single packet request payload
+							if checkNotEmpty(httpPayload[4:(4 + totalNumPackets)]) {
+								responseBytes := getResponsePacketBytes(httpPayload, totalNumPackets, hostAddr, packet)
+								if len(responseBytes) < 1024 {
+									// single packet response payload
+									udpWrite(udpConn, responseBytes, addr, clients, clientKey)
+									for i := 0; i < 15; i++ {
+										stop := udpWrite(udpConn, responseBytes, addr, clients, clientKey)
+										if stop {
+											return
+										}
+										time.Sleep(time.Second)
+									}
+								} else {
+									// multi packet response payload
 								}
 							}
 						}
