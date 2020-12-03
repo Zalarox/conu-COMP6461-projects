@@ -87,7 +87,7 @@ func makePacket(pType uint32, seqNo uint32, parsedURL *url.URL, payload string) 
 	}
 }
 
-func getDataPacketBytes(seqNo uint32, parsedURL *url.URL, payload string) [][]byte {
+func getDataPacketBytes(seqNo uint32, parsedURL *url.URL, payload string) ([][]byte, int) {
 	numPackets := int(math.Ceil(float64(len(payload)+11) / float64(1024)))
 	packetsBytes := make([][]byte, numPackets)
 	payloadBytes := []byte(payload)
@@ -95,7 +95,7 @@ func getDataPacketBytes(seqNo uint32, parsedURL *url.URL, payload string) [][]by
 	if numPackets == 1 {
 		packetBytes := getBytesFromPacket(makePacket(0, seqNo, parsedURL, payload))
 		packetsBytes[0] = packetBytes
-		return packetsBytes
+		return packetsBytes, 1
 	}
 
 	counter := 0
@@ -111,10 +111,10 @@ func getDataPacketBytes(seqNo uint32, parsedURL *url.URL, payload string) [][]by
 		residueChunk := payloadBytes[counter:]
 		packetsBytes[numPackets-1] = getBytesFromPacket(makePacket(0, seqNo, parsedURL, string(residueChunk)))
 	}
-	return packetsBytes
+	return packetsBytes, numPackets
 }
 
-func handshake(conn *net.UDPConn, parsedURL *url.URL) {
+func handshake(conn *net.UDPConn, parsedURL *url.URL, numPackets int) {
 	for {
 		deadline := time.Now().Add(15 * time.Second)
 		//wTimeoutErr := conn.SetWriteDeadline(deadline)
@@ -125,7 +125,7 @@ func handshake(conn *net.UDPConn, parsedURL *url.URL) {
 		}
 
 		seqInit := uint32(1)
-		packet := makePacket(2, seqInit, parsedURL, "")
+		packet := makePacket(2, seqInit, parsedURL, fmt.Sprintf("%d", numPackets))
 		packetBytes := getBytesFromPacket(packet)
 
 		_, err := conn.Write(packetBytes)
@@ -178,7 +178,7 @@ func UDPGet(inputUrl string, headers RequestHeader) (string, error) {
 		parsedURL.RequestURI(), ProtocolVersion, CRLF,
 		parsedHeaders, CRLF, CRLF)
 
-	packets := getDataPacketBytes(4, parsedURL, requestString)
+	packets, _ := getDataPacketBytes(4, parsedURL, requestString)
 
 	for _, packetBytes := range packets {
 		_, err = conn.Write(packetBytes)
@@ -213,7 +213,10 @@ func UDPPost(inputUrl string, headers RequestHeader, body []byte) (string, error
 		parsedURL.RequestURI(), ProtocolVersion, CRLF,
 		parsedHeaders, CRLF, body, CRLF)
 
-	packets := getDataPacketBytes(4, parsedURL, requestString)
+	packets, numPackets := getDataPacketBytes(4, parsedURL, requestString)
+
+	// make handshake
+	handshake(conn, parsedURL, numPackets)
 
 	// start a goroutine listener for the ACKs/NAKs
 	packetChan := make(chan UDPPacket)
@@ -254,7 +257,6 @@ func UDPPost(inputUrl string, headers RequestHeader, body []byte) (string, error
 		}
 
 		if responsePacket.pType[0] == 0 {
-			// break out and return the payload...
 			break
 		}
 	}
@@ -427,7 +429,7 @@ func udpConnectHandler(inputUrl string, headers RequestHeader) (*url.URL, string
 		fmt.Println(err)
 	}
 	conn, err := net.DialUDP("udp", nil, hostUdpAddr)
-	handshake(conn, parsedURL)
+
 	return parsedURL, parsedHeaders, conn, err
 }
 
