@@ -312,11 +312,12 @@ func StartUDPServer(port string, directory string, verbose bool) {
 								LogInfo("Timeout for retransmitted!")
 							}
 							LogInfo(fmt.Sprintf("ACK'd packet %d", receivedSeqNo))
+							httpPayload[int(receivedSeqNo)] = string(packet.payload)
+
 							// CHECK IF IN naks
-							if inNaks(receivedSeqNo, naks) {
-								// STORE payload in proper structure
-								httpPayload[int(receivedSeqNo)] = string(packet.payload)
-							}
+							//if inNaks(receivedSeqNo, naks) {
+							// STORE payload in proper structure
+							//}
 							// else DISCARD PACKET
 						} else {
 							// SEND ACK
@@ -327,6 +328,7 @@ func StartUDPServer(port string, directory string, verbose bool) {
 								LogInfo("Timeout for higher seqNo!")
 							}
 							LogInfo(fmt.Sprintf("ACK'd packet %d", receivedSeqNo))
+							httpPayload[int(receivedSeqNo)] = string(packet.payload)
 							for packetNum := expectedSeqNo; packetNum < receivedSeqNo; packetNum++ {
 								naks = append(naks, packetNum)
 								nakPacket := MakePacket(4, packetNum, hostAddr, binary.BigEndian.Uint16(packet.peerPort), "")
@@ -384,8 +386,10 @@ func StartUDPServer(port string, directory string, verbose bool) {
 				}
 			}()
 		}
-
-		clientPackets.(chan UDPPacket) <- packet
+		_, ok := clients.Load(clientKey)
+		if ok {
+			clientPackets.(chan UDPPacket) <- packet
+		}
 	}
 }
 
@@ -457,7 +461,7 @@ func handleHandshakePacket(packet UDPPacket, addr *net.UDPAddr, conn *net.UDPCon
 	} else if packet.pType[0] == 1 {
 		// ACK
 		receivedSeq := binary.BigEndian.Uint32(packet.seqNo)
-		LogInfo(fmt.Sprintf("ACK'd packet %d", receivedSeq))
+		LogInfo(fmt.Sprintf("Received ACK for packet %d", receivedSeq))
 	}
 	return nil
 }
