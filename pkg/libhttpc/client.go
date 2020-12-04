@@ -238,7 +238,8 @@ func UDPGet(inputUrl string, headers RequestHeader) (string, error) {
 		responsePacket = ParsePacket(readBuf)
 
 		if err != nil {
-			return BlankString, nil
+			fmt.Println("Timeout reading...")
+			continue
 		}
 
 		if responsePacket.pType[0] == 1 || responsePacket.pType[0] == 4 {
@@ -282,17 +283,6 @@ func UDPPost(inputUrl string, headers RequestHeader, body []byte) (string, error
 	packetChan := make(chan UDPPacket)
 
 	go func() {
-		//for packet := range packetChan {
-		//	if packet.pType[0] == 4 {
-		//		fmt.Println("Handling NAK")
-		//		missingNo := binary.BigEndian.Uint32(packet.seqNo)
-		//		missingPacket := packets[int(missingNo)-4]
-		//		_, err = conn.Write(missingPacket)
-		//		if err != nil {
-		//			fmt.Println(err)
-		//		}
-		//	}
-		//}
 		var nakList []UDPPacket
 
 		for packet := range packetChan {
@@ -328,7 +318,6 @@ func UDPPost(inputUrl string, headers RequestHeader, body []byte) (string, error
 		responsePacket = ParsePacket(readBuf)
 
 		if err != nil {
-			fmt.Println(err)
 			continue
 		}
 

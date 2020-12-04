@@ -250,26 +250,25 @@ func StartUDPServer(port string, directory string, verbose bool) {
 		return
 	}
 
-	defer func() {
-		fmt.Println("Closing away")
-		udpConn.Close()
-	}()
+	defer udpConn.Close()
 
 	clients := new(sync.Map)
+	doneMap := new(sync.Map)
 	for {
 		buffer := make([]byte, 1024)
-
+		udpConn.SetReadDeadline(time.Now().Add(1 * time.Second))
 		n, addr, err := udpConn.ReadFromUDP(buffer)
+
 		if err != nil {
-			fmt.Println(err)
-			return
+			continue
 		}
 
 		packet := parsePacket(buffer[:n])
 		hostAddr := getAddressFromBytes(packet)
 		hostPort := getPortFromBytes(packet)
 		clientKey := fmt.Sprintf("%s:%d", hostAddr, hostPort)
-		clientPackets, loaded := clients.LoadOrStore(clientKey, make(chan UDPPacket))
+		clientPackets, loaded := clients.LoadOrStore(clientKey, make(chan UDPPacket, 1024))
+		clientDone, _ := doneMap.LoadOrStore(clientKey, make(chan bool, 1))
 
 		if !loaded {
 			go func() {
@@ -313,12 +312,6 @@ func StartUDPServer(port string, directory string, verbose bool) {
 							}
 							LogInfo(fmt.Sprintf("ACK'd packet %d", receivedSeqNo))
 							httpPayload[int(receivedSeqNo)] = string(packet.payload)
-
-							// CHECK IF IN naks
-							//if inNaks(receivedSeqNo, naks) {
-							// STORE payload in proper structure
-							//}
-							// else DISCARD PACKET
 						} else {
 							// SEND ACK
 							ackPacket := MakePacket(1, receivedSeqNo, hostAddr, binary.BigEndian.Uint16(packet.peerPort), "")
@@ -347,11 +340,17 @@ func StartUDPServer(port string, directory string, verbose bool) {
 							responseBytes := getResponsePacketBytes(httpPayload, totalNumPackets, hostAddr, packet)
 							if len(responseBytes) < 1024 {
 								// single packet response payload
-								udpWrite(udpConn, responseBytes, addr, clients, clientKey)
+								udpWrite(udpConn, responseBytes, addr)
 								for i := 0; i < 15; i++ {
-									stop := udpWrite(udpConn, responseBytes, addr, clients, clientKey)
+									stop := udpWrite(udpConn, responseBytes, addr)
 									if stop {
-										return
+										select {
+										case clientDone.(chan bool) <- true:
+											fmt.Println("Responded to Client!")
+											return
+										default:
+											fmt.Println("Failed to respond to client!")
+										}
 									}
 									time.Sleep(time.Second)
 								}
@@ -365,11 +364,17 @@ func StartUDPServer(port string, directory string, verbose bool) {
 								responseBytes := getResponsePacketBytes(httpPayload, totalNumPackets, hostAddr, packet)
 								if len(responseBytes) < 1024 {
 									// single packet response payload
-									udpWrite(udpConn, responseBytes, addr, clients, clientKey)
+									udpWrite(udpConn, responseBytes, addr)
 									for i := 0; i < 15; i++ {
-										stop := udpWrite(udpConn, responseBytes, addr, clients, clientKey)
+										stop := udpWrite(udpConn, responseBytes, addr)
 										if stop {
-											return
+											select {
+											case clientDone.(chan bool) <- true:
+												fmt.Println("Responded to Client!")
+												return
+											default:
+												fmt.Println("Failed to respond to client!")
+											}
 										}
 										time.Sleep(time.Second)
 									}
@@ -386,9 +391,20 @@ func StartUDPServer(port string, directory string, verbose bool) {
 				}
 			}()
 		}
-		_, ok := clients.Load(clientKey)
-		if ok {
-			clientPackets.(chan UDPPacket) <- packet
+
+		select {
+		case done := <-clientDone.(chan bool):
+			// Really bad way but this ensures no sending to closed channel
+			// release resources only when you detect a stale retransmission
+			if done {
+				timeOut(clients, clientKey)
+			}
+		default:
+			select {
+			case clientPackets.(chan UDPPacket) <- packet:
+			default:
+				fmt.Println("Failed to buffer packet!!")
+			}
 		}
 	}
 }
@@ -411,10 +427,10 @@ func getResponsePacketBytes(httpPayload []string, totalNumPackets int, hostAddr 
 	return packetBytes
 }
 
-func udpWrite(udpConn *net.UDPConn, packetBytes []byte, addr *net.UDPAddr, clients *sync.Map, hostAddr string) bool {
+func udpWrite(udpConn *net.UDPConn, packetBytes []byte, addr *net.UDPAddr) bool {
+	udpConn.SetWriteDeadline(time.Now().Add(time.Second))
 	_, writeErr := udpConn.WriteToUDP(packetBytes, addr)
 	if writeErr != nil {
-		timeOut(clients, hostAddr)
 		return true
 	}
 	return false
