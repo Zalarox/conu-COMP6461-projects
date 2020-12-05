@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"os"
 	"strconv"
@@ -278,6 +279,8 @@ func StartUDPServer(port string, directory string, verbose bool) {
 				naks := make([]uint32, 5)
 				httpPayload := make([]string, 1024)
 				var totalNumPackets int // might need to set this to a large number
+				//var responsePacketsBytes [][]byte
+				//var numOfResponsePackets int
 
 				for packet := range clientPackets.(chan UDPPacket) {
 					timeout := 2 * time.Second
@@ -337,50 +340,11 @@ func StartUDPServer(port string, directory string, verbose bool) {
 						// check if we are done reading the payload
 						if totalNumPackets == 1 && len(httpPayload[4]) > 0 {
 							// single packet request payload
-							responseBytes := getResponsePacketBytes(httpPayload, totalNumPackets, hostAddr, packet)
-							if len(responseBytes) < 1024 {
-								// single packet response payload
-								udpWrite(udpConn, responseBytes, addr)
-								for i := 0; i < 15; i++ {
-									stop := udpWrite(udpConn, responseBytes, addr)
-									if stop {
-										select {
-										case clientDone.(chan bool) <- true:
-											fmt.Println("Responded to Client!")
-											return
-										default:
-											fmt.Println("Failed to respond to client!")
-										}
-									}
-									time.Sleep(time.Second)
-								}
-							} else {
-								// multi packet response payload
-							}
-
+							writeResponseToClient(httpPayload, totalNumPackets, hostAddr, hostPort, udpConn, addr)
 						} else {
 							// single packet request payload
 							if checkNotEmpty(httpPayload[4:(4 + totalNumPackets)]) {
-								responseBytes := getResponsePacketBytes(httpPayload, totalNumPackets, hostAddr, packet)
-								if len(responseBytes) < 1024 {
-									// single packet response payload
-									udpWrite(udpConn, responseBytes, addr)
-									for i := 0; i < 15; i++ {
-										stop := udpWrite(udpConn, responseBytes, addr)
-										if stop {
-											select {
-											case clientDone.(chan bool) <- true:
-												fmt.Println("Responded to Client!")
-												return
-											default:
-												fmt.Println("Failed to respond to client!")
-											}
-										}
-										time.Sleep(time.Second)
-									}
-								} else {
-									// multi packet response payload
-								}
+								writeResponseToClient(httpPayload, totalNumPackets, hostAddr, hostPort, udpConn, addr)
 							}
 						}
 					}
@@ -409,6 +373,18 @@ func StartUDPServer(port string, directory string, verbose bool) {
 	}
 }
 
+func writeResponseToClient(httpPayload []string, totalNumPackets int, hostAddr string, hostPort int, udpConn *net.UDPConn, addr *net.UDPAddr) ([][]byte, int) {
+	stringifiedResponsePayload := getResponsePayload(httpPayload, totalNumPackets)
+	responsePacketsBytes, numOfResponsePackets := getResponsePacketBytes(1, hostAddr, uint16(hostPort), stringifiedResponsePayload)
+	for _, packetBytes := range responsePacketsBytes {
+		_, err := udpConn.WriteToUDP(packetBytes, addr)
+		if err != nil {
+			fmt.Println(err)
+		}
+	}
+	return responsePacketsBytes, numOfResponsePackets
+}
+
 func timeOut(clients *sync.Map, hostAddr string) {
 	client, ok := clients.LoadAndDelete(hostAddr)
 	if !ok {
@@ -419,21 +395,40 @@ func timeOut(clients *sync.Map, hostAddr string) {
 	}
 }
 
-func getResponsePacketBytes(httpPayload []string, totalNumPackets int, hostAddr string, packet UDPPacket) []byte {
+func getResponsePayload(httpPayload []string, totalNumPackets int) string {
 	stringifiedPayload := stringifyRequestPayload(httpPayload, totalNumPackets)
 	responsePayload := *handleUdpConnection(stringifiedPayload)
-	dataPacket := MakePacket(0, 1, hostAddr, binary.BigEndian.Uint16(packet.peerPort), responsePayload)
-	packetBytes := getBytesFromPacket(dataPacket)
-	return packetBytes
+	return responsePayload
 }
 
-func udpWrite(udpConn *net.UDPConn, packetBytes []byte, addr *net.UDPAddr) bool {
-	udpConn.SetWriteDeadline(time.Now().Add(time.Second))
-	_, writeErr := udpConn.WriteToUDP(packetBytes, addr)
-	if writeErr != nil {
-		return true
+func getResponsePacketBytes(seqNo uint32, hostAddr string, port uint16, payload string) ([][]byte, int) {
+	numPackets := int(math.Ceil(float64(len(payload)) / float64(1012)))
+	packetsBytes := make([][]byte, numPackets)
+	payloadBytes := []byte(payload)
+
+	if numPackets == 1 {
+		packetBytes := getBytesFromPacket(MakePacket(0, seqNo, hostAddr, port, payload))
+		packetsBytes[0] = packetBytes
+		packetsBytes[0] = append(packetsBytes[0], byte(1))
+		return packetsBytes, 1
 	}
-	return false
+
+	counter := 0
+	for i := 1; i < numPackets; i++ {
+		chunk := payloadBytes[counter : counter+1012]
+		packetForChunk := MakePacket(0, seqNo, hostAddr, port, string(chunk))
+		packetsBytes[i-1] = getBytesFromPacket(packetForChunk)
+		packetsBytes[i-1] = append(packetsBytes[i-1], byte(numPackets))
+		counter += 1012
+		seqNo++
+	}
+	residue := len(payload) % 1012
+	if residue > 0 {
+		residueChunk := payloadBytes[counter:]
+		packetsBytes[numPackets-1] = getBytesFromPacket(MakePacket(0, seqNo, hostAddr, port, string(residueChunk)))
+		packetsBytes[numPackets-1] = append(packetsBytes[numPackets-1], byte(numPackets))
+	}
+	return packetsBytes, numPackets
 }
 
 func stringifyRequestPayload(httpPayload []string, totalNumPackets int) string {
