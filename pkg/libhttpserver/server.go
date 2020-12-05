@@ -277,14 +277,14 @@ func StartUDPServer(port string, directory string, verbose bool) {
 				acks := make([]uint32, 5)
 				naks := make([]uint32, 5)
 				httpPayload := make([]string, 1024)
-				var totalNumPackets int
+				var totalNumPackets int // might need to set this to a large number
 
 				for packet := range clientPackets.(chan UDPPacket) {
 					timeout := 2 * time.Second
 					deadline := time.Now().Add(timeout)
 					_ = udpConn.SetWriteDeadline(deadline)
 					receivedSeqNo := binary.BigEndian.Uint32(packet.seqNo)
-					if packet.pType[0] == 0 {
+					if packet.pType[0] == 0 { // add an && for if totalNumPackets is not known after a timeout then close
 						if inAcks(receivedSeqNo, acks) {
 							continue
 						}

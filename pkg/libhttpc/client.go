@@ -276,11 +276,17 @@ func UDPPost(inputUrl string, headers RequestHeader, body []byte) (string, error
 
 	packets, numPackets := getDataPacketBytes(4, parsedURL, requestString)
 
+	// ack packets
+	ackPackets := make([]UDPPacket, numPackets)
+	for i, copyPacket := range packets {
+		ackPackets[i] = ParsePacket(copyPacket)
+	}
+
 	// make handshake
 	handshake(conn, parsedURL, numPackets)
 
 	// start a goroutine listener for the ACKs/NAKs
-	packetChan := make(chan UDPPacket)
+	packetChan := make(chan UDPPacket, 1024)
 
 	go func() {
 		var nakList []UDPPacket
@@ -293,7 +299,7 @@ func UDPPost(inputUrl string, headers RequestHeader, body []byte) (string, error
 			}
 
 			for _, nakPack := range nakList {
-				fmt.Println("Handling NAK")
+				fmt.Println("Sending NAK!")
 				missingNo := binary.BigEndian.Uint32(nakPack.seqNo)
 				missingPacket := packets[int(missingNo)-4]
 				_, err = conn.Write(missingPacket)
@@ -314,15 +320,34 @@ func UDPPost(inputUrl string, headers RequestHeader, body []byte) (string, error
 
 	for {
 		readBuf := make([]byte, 1024)
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 		_, _, err = conn.ReadFromUDP(readBuf)
 		responsePacket = ParsePacket(readBuf)
 
 		if err != nil {
+			// retransmission of packets not ACK'd
+			for _, lostPacket := range ackPackets {
+				fmt.Println("Sending lost packet!")
+				_, err = conn.Write(getBytesFromPacket(lostPacket))
+				if err != nil {
+					fmt.Println(err)
+				}
+			}
 			continue
 		}
 
 		if responsePacket.pType[0] == 1 || responsePacket.pType[0] == 4 {
-			packetChan <- responsePacket
+			if responsePacket.pType[0] == 1 {
+				ackPackets = remove(ackPackets, responsePacket)
+			}
+			select {
+			case packetChan <- responsePacket:
+				// do nothing
+				packetChan <- responsePacket
+			default:
+				// buffer is full
+				fmt.Println("channel buffer overflow!")
+			}
 		}
 
 		if responsePacket.pType[0] == 0 {
