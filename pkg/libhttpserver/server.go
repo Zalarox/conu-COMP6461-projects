@@ -277,9 +277,10 @@ func StartUDPServer(port string, directory string, verbose bool) {
 				expectedSeqNo = 4
 				acks := make([]uint32, 5)
 				naks := make([]uint32, 5)
+				var responseNaksList []UDPPacket
 				httpPayload := make([]string, 1024)
 				var totalNumPackets int // might need to set this to a large number
-				//var responsePacketsBytes [][]byte
+				var responsePackets []UDPPacket
 				//var numOfResponsePackets int
 
 				for packet := range clientPackets.(chan UDPPacket) {
@@ -287,12 +288,24 @@ func StartUDPServer(port string, directory string, verbose bool) {
 					deadline := time.Now().Add(timeout)
 					_ = udpConn.SetWriteDeadline(deadline)
 					receivedSeqNo := binary.BigEndian.Uint32(packet.seqNo)
+
+					if packet.pType[0] == 4 {
+						responseNaksList = append(responseNaksList, packet)
+						sendUnreceivedResponsePackets(responseNaksList, responsePackets, udpConn, addr)
+					} else if packet.pType[0] == 1 {
+						if receivedSeqNo == 3 {
+							continue
+						}
+						responseNaksList = remove(responseNaksList, packet)
+						sendUnreceivedResponsePackets(responseNaksList, responsePackets, udpConn, addr)
+					}
+
 					if packet.pType[0] == 0 { // add an && for if totalNumPackets is not known after a timeout then close
 						if inAcks(receivedSeqNo, acks) {
 							continue
 						}
+						acks = append(acks, receivedSeqNo)
 						if receivedSeqNo == expectedSeqNo {
-							acks = append(acks, receivedSeqNo)
 							// SEND ACK
 							ackPacket := MakePacket(1, receivedSeqNo, hostAddr, binary.BigEndian.Uint16(packet.peerPort), "")
 							packetBytes := getBytesFromPacket(ackPacket)
@@ -340,11 +353,11 @@ func StartUDPServer(port string, directory string, verbose bool) {
 						// check if we are done reading the payload
 						if totalNumPackets == 1 && len(httpPayload[4]) > 0 {
 							// single packet request payload
-							writeResponseToClient(httpPayload, totalNumPackets, hostAddr, hostPort, udpConn, addr)
+							responsePackets, _ = writeResponseToClient(httpPayload, totalNumPackets, hostAddr, hostPort, udpConn, addr)
 						} else {
 							// single packet request payload
 							if checkNotEmpty(httpPayload[4:(4 + totalNumPackets)]) {
-								writeResponseToClient(httpPayload, totalNumPackets, hostAddr, hostPort, udpConn, addr)
+								responsePackets, _ = writeResponseToClient(httpPayload, totalNumPackets, hostAddr, hostPort, udpConn, addr)
 							}
 						}
 					}
@@ -373,16 +386,29 @@ func StartUDPServer(port string, directory string, verbose bool) {
 	}
 }
 
-func writeResponseToClient(httpPayload []string, totalNumPackets int, hostAddr string, hostPort int, udpConn *net.UDPConn, addr *net.UDPAddr) ([][]byte, int) {
+func sendUnreceivedResponsePackets(responseNaksList []UDPPacket, responsePackets []UDPPacket, udpConn *net.UDPConn, addr *net.UDPAddr) {
+	for _, nakPack := range responseNaksList {
+		missingNo := binary.BigEndian.Uint32(nakPack.seqNo)
+		missingPacket := responsePackets[int(missingNo)-1]
+		_, err := udpConn.WriteToUDP(getBytesFromPacket(missingPacket), addr)
+		if err != nil {
+			fmt.Println(err)
+		}
+	}
+}
+
+func writeResponseToClient(httpPayload []string, totalNumPackets int, hostAddr string, hostPort int, udpConn *net.UDPConn, addr *net.UDPAddr) ([]UDPPacket, int) {
 	stringifiedResponsePayload := getResponsePayload(httpPayload, totalNumPackets)
+	var responsePackets []UDPPacket
 	responsePacketsBytes, numOfResponsePackets := getResponsePacketBytes(1, hostAddr, uint16(hostPort), stringifiedResponsePayload)
 	for _, packetBytes := range responsePacketsBytes {
+		responsePackets = append(responsePackets, parsePacket(packetBytes))
 		_, err := udpConn.WriteToUDP(packetBytes, addr)
 		if err != nil {
 			fmt.Println(err)
 		}
 	}
-	return responsePacketsBytes, numOfResponsePackets
+	return responsePackets, numOfResponsePackets
 }
 
 func timeOut(clients *sync.Map, hostAddr string) {
@@ -393,6 +419,15 @@ func timeOut(clients *sync.Map, hostAddr string) {
 		close(client.(chan UDPPacket))
 		LogInfo("Closing client channel for " + hostAddr)
 	}
+}
+
+func remove(packetList []UDPPacket, removePack UDPPacket) []UDPPacket {
+	for i, curr := range packetList {
+		if binary.BigEndian.Uint32(curr.seqNo) == binary.BigEndian.Uint32(removePack.seqNo) {
+			return append(packetList[:i], packetList[i+1:]...)
+		}
+	}
+	return packetList
 }
 
 func getResponsePayload(httpPayload []string, totalNumPackets int) string {

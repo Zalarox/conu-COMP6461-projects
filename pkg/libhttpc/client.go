@@ -88,7 +88,7 @@ func makePacket(pType uint32, seqNo uint32, parsedURL *url.URL, payload string) 
 }
 
 func getDataPacketBytes(seqNo uint32, parsedURL *url.URL, payload string) ([][]byte, int) {
-	numPackets := int(math.Ceil(float64(len(payload)+11) / float64(1024)))
+	numPackets := int(math.Ceil(float64(len(payload)) / float64(1013)))
 	packetsBytes := make([][]byte, numPackets)
 	payloadBytes := []byte(payload)
 
@@ -106,7 +106,7 @@ func getDataPacketBytes(seqNo uint32, parsedURL *url.URL, payload string) ([][]b
 		counter += 1013
 		seqNo++
 	}
-	residue := (len(payload) + 11) % 1024
+	residue := len(payload) % 1013
 	if residue > 0 {
 		residueChunk := payloadBytes[counter:]
 		packetsBytes[numPackets-1] = getBytesFromPacket(makePacket(0, seqNo, parsedURL, string(residueChunk)))
@@ -195,6 +195,8 @@ func UDPGet(inputUrl string, headers RequestHeader) (string, error) {
 	// start a goroutine listener for the ACKs/NAKs
 	packetChan := make(chan UDPPacket)
 
+	var responsePayload []string
+	numOfResponsePackets := -1
 	var nakList []UDPPacket
 
 	go func() {
@@ -231,14 +233,17 @@ func UDPGet(inputUrl string, headers RequestHeader) (string, error) {
 	}
 
 	var responsePacket UDPPacket
+	var expectedSeqNo uint32
+	expectedSeqNo = 1
+	acks := make([]uint32, 5)
+	naks := make([]uint32, 5)
 
 	for {
 		readBuf := make([]byte, 1024)
-		_, _, err = conn.ReadFromUDP(readBuf)
+		_, _, readErr := conn.ReadFromUDP(readBuf)
 		responsePacket = ParsePacket(readBuf)
 
-		if err != nil {
-			fmt.Println("Timeout reading...")
+		if readErr != nil {
 			continue
 		}
 
@@ -253,11 +258,66 @@ func UDPGet(inputUrl string, headers RequestHeader) (string, error) {
 		}
 
 		if responsePacket.pType[0] == 0 {
-			break
+			if numOfResponsePackets == -1 {
+				numOfResponsePackets = int(responsePacket.payload[len(responsePacket.payload)-1])
+				if numOfResponsePackets == 0 {
+					numOfResponsePackets = 1
+				}
+				responsePayload = make([]string, numOfResponsePackets+2)
+			}
+			responseSeq := binary.BigEndian.Uint32(responsePacket.seqNo)
+
+			responsePacketPayloadLength := len(responsePacket.payload) - 1
+			responseSlice := responsePacket.payload[0:responsePacketPayloadLength]
+			responsePayload[responseSeq] = string(responseSlice)
+			acks = append(acks, responseSeq)
+			if responseSeq == expectedSeqNo {
+				ackPacket := makePacket(4, responseSeq, parsedURL, "")
+				packetBytes := getBytesFromPacket(ackPacket)
+				_, writeErr := conn.Write(packetBytes)
+				if writeErr != nil {
+					fmt.Println("Timeout writing ACK!")
+				}
+				fmt.Println(fmt.Sprintf("ACK'd packet %d", responseSeq))
+				expectedSeqNo++
+			} else if responseSeq < expectedSeqNo {
+				// SEND ACK
+				ackPacket := makePacket(4, responseSeq, parsedURL, "")
+				packetBytes := getBytesFromPacket(ackPacket)
+				_, writeErr := conn.Write(packetBytes)
+				if writeErr != nil {
+					fmt.Println("Timeout writing ACK!")
+				}
+				fmt.Println(fmt.Sprintf("ACK'd packet %d", responseSeq))
+			} else {
+				for packetNum := expectedSeqNo; packetNum < responseSeq; packetNum++ {
+					naks = append(naks, packetNum)
+					nakPacket := makePacket(4, packetNum, parsedURL, "")
+					packetBytes := getBytesFromPacket(nakPacket)
+					_, writeErr := conn.Write(packetBytes)
+					if writeErr != nil {
+						fmt.Println("Timeout writing NAKs!")
+					}
+					fmt.Println(fmt.Sprintf("NAK'd packet %d", packetNum))
+				}
+				expectedSeqNo = responseSeq + 1
+			}
+			if numOfResponsePackets == 1 {
+				return responsePayload[responseSeq], nil
+			} else if checkNotEmpty(responsePayload[1:numOfResponsePackets]) {
+				return stringifiedResponse(responsePayload[1:numOfResponsePackets]), nil
+			}
+
 		}
 	}
+}
 
-	return string(responsePacket.payload), nil
+func stringifiedResponse(responsePayload []string) string {
+	response := ""
+	for _, stringifiedPacket := range responsePayload {
+		response += stringifiedPacket
+	}
+	return response
 }
 
 func UDPPost(inputUrl string, headers RequestHeader, body []byte) (string, error) {
@@ -552,4 +612,13 @@ func stringifyHeaders(headers RequestHeader) string {
 		headersString += fmt.Sprintf("%s:%s%s", headerKey, headerValue, CRLF)
 	}
 	return headersString
+}
+
+func checkNotEmpty(responsePayload []string) bool {
+	for _, packet := range responsePayload {
+		if len(packet) == 0 {
+			return false
+		}
+	}
+	return true
 }
