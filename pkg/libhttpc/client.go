@@ -244,7 +244,7 @@ func UDPGet(inputUrl string, headers RequestHeader) (string, error) {
 			responseSeq := binary.BigEndian.Uint32(responsePacket.seqNo)
 
 			responsePacketPayloadLength := len(responsePacket.payload) - 1
-			responseSlice := responsePacket.payload[0:responsePacketPayloadLength]
+			responseSlice := responsePacket.payload[0 : responsePacketPayloadLength-1]
 			responsePayload[responseSeq] = string(responseSlice)
 			acks = append(acks, responseSeq)
 			if responseSeq == expectedSeqNo {
