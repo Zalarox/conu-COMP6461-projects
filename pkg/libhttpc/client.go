@@ -13,22 +13,6 @@ import (
 	"time"
 )
 
-//func udp_send_recv(inputUrl string, reader io.Reader) {
-//
-//	conn, err := udpConnectHandler(inputUrl)
-//	n, err := io.Copy(conn, reader)
-//	if err != nil {
-//		fmt.Println(err)
-//	}
-//	fmt.Printf("Packets written: %d", n)
-//	buffer := make([]byte, 1024)
-//	timeout := 15 * time.Second
-//	deadline := time.Now().Add(timeout)
-//	_ = conn.SetDeadline(deadline)
-//	readBytes, addr, err := conn.ReadFrom(buffer)
-//	fmt.Printf("Received %d bytes from %s", readBytes, addr)
-//}
-
 func ParsePacket(data []byte) UDPPacket {
 	pType := data[0]
 	seqNo := data[1:5]
@@ -212,17 +196,6 @@ func UDPGet(inputUrl string, headers RequestHeader) (string, error) {
 				}
 			}
 		}
-		//for len(nakList) > 0 {
-		//	for _, packet := range nakList {
-		//		fmt.Println("Handling NAK")
-		//		missingNo := binary.BigEndian.Uint32(packet.seqNo)
-		//		missingPacket := packets[int(missingNo)-4]
-		//		_, err = conn.Write(missingPacket)
-		//		if err != nil {
-		//			fmt.Println(err)
-		//		}
-		//	}
-		//}
 	}()
 
 	for _, packetBytes := range packets {
@@ -242,13 +215,16 @@ func UDPGet(inputUrl string, headers RequestHeader) (string, error) {
 		readBuf := make([]byte, 1024)
 		_, _, readErr := conn.ReadFromUDP(readBuf)
 		responsePacket = ParsePacket(readBuf)
-
 		if readErr != nil {
 			continue
 		}
 
 		if responsePacket.pType[0] == 1 || responsePacket.pType[0] == 4 {
-			packetChan <- responsePacket
+			select {
+			case packetChan <- responsePacket:
+			default:
+				// loop again
+			}
 		}
 
 		if responsePacket.pType[0] == 4 {
@@ -263,7 +239,7 @@ func UDPGet(inputUrl string, headers RequestHeader) (string, error) {
 				if numOfResponsePackets == 0 {
 					numOfResponsePackets = 1
 				}
-				responsePayload = make([]string, numOfResponsePackets+2)
+				responsePayload = make([]string, numOfResponsePackets+5)
 			}
 			responseSeq := binary.BigEndian.Uint32(responsePacket.seqNo)
 
@@ -278,7 +254,7 @@ func UDPGet(inputUrl string, headers RequestHeader) (string, error) {
 				if writeErr != nil {
 					fmt.Println("Timeout writing ACK!")
 				}
-				fmt.Println(fmt.Sprintf("ACK'd packet %d", responseSeq))
+				//fmt.Println(fmt.Sprintf("ACK'd packet %d", responseSeq))
 				expectedSeqNo++
 			} else if responseSeq < expectedSeqNo {
 				// SEND ACK
@@ -288,7 +264,7 @@ func UDPGet(inputUrl string, headers RequestHeader) (string, error) {
 				if writeErr != nil {
 					fmt.Println("Timeout writing ACK!")
 				}
-				fmt.Println(fmt.Sprintf("ACK'd packet %d", responseSeq))
+				//fmt.Println(fmt.Sprintf("ACK'd packet %d", responseSeq))
 			} else {
 				for packetNum := expectedSeqNo; packetNum < responseSeq; packetNum++ {
 					naks = append(naks, packetNum)
@@ -298,14 +274,14 @@ func UDPGet(inputUrl string, headers RequestHeader) (string, error) {
 					if writeErr != nil {
 						fmt.Println("Timeout writing NAKs!")
 					}
-					fmt.Println(fmt.Sprintf("NAK'd packet %d", packetNum))
+					//fmt.Println(fmt.Sprintf("NAK'd packet %d", packetNum))
 				}
 				expectedSeqNo = responseSeq + 1
 			}
 			if numOfResponsePackets == 1 {
 				return responsePayload[responseSeq], nil
-			} else if checkNotEmpty(responsePayload[1:numOfResponsePackets]) {
-				return stringifiedResponse(responsePayload[1:numOfResponsePackets]), nil
+			} else if checkNotEmpty(responsePayload[1 : numOfResponsePackets+1]) {
+				return stringifiedResponse(responsePayload[1 : numOfResponsePackets+1]), nil
 			}
 
 		}
@@ -406,7 +382,7 @@ func UDPPost(inputUrl string, headers RequestHeader, body []byte) (string, error
 				packetChan <- responsePacket
 			default:
 				// buffer is full
-				fmt.Println("channel buffer overflow!")
+				//fmt.Println("channel buffer overflow!")
 			}
 		}
 
